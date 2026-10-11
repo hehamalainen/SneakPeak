@@ -1,0 +1,16 @@
+.build/
+dist/
+runtime/*
+!runtime/.gitkeep
+__pycache__/
+*.pyc
+.DS_Store
+.swiftpm/
+.venv/
+venv/
+.env
+.env.*
+*.log
+*.dSYM/
+# UI captures may include private session data; opt in only after review.
+docs/*preview*.png
