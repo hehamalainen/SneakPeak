@@ -25,7 +25,7 @@ Missing evidence, inconclusive claims, old evidence, silence, and a finished tur
 
 ## Evidence and review lifetime
 
-Evidence records live separately from editable mission definitions. A goal revision binds outcome, constraints, check identities, labels, kinds, and required settings. An evidence fingerprint binds its identity, scope, assertion, reference, verdict, timestamp, digest, and local artifact version. Human reviews bind both revision and fingerprint. A newer report supersedes an older accepted report; an old pass cannot hide a later failure.
+Evidence records live separately from editable mission definitions. A goal revision binds outcome, workspace context, constraints, check identities, labels, kinds, and required settings. An evidence fingerprint binds its identity, scope, assertion, reference, verdict, timestamp, digest, and local artifact version. Human reviews bind both revision and fingerprint. A newer report supersedes an older accepted report; an old pass cannot hide a later failure.
 
 The default evidence age window is 24 hours. The mission editor offers 1 hour, 24 hours, 7 days, or no age limit. Check-specific windows are supported by the model. A goal change invalidates earlier evidence even without an age limit. Local file reports capture a SHA-256 digest, size, and modification time. Projection checks size/time and availability; human acceptance also rehashes the content. This is a local freshness mechanism, not tamper-proof monitoring. Remote HTTPS references are not fetched or version-checked. Human acceptance records the person's assessment; it is not an independent automated test.
 
@@ -67,7 +67,7 @@ The native client sends structured JSON through standard input to `bridge/missio
 | Queue, evidence inspection, Taste and guidance forms | `Sources/SneakPeek/TrackingViews.swift` |
 | Stable acceptance-check editing | `Sources/SneakPeek/MissionEditor.swift` |
 
-Definition saves use the same per-mission lock as progress publication and reject stale definition revisions. A title-only edit merges freshly published legacy evidence by stable check ID. Evidence/review/Taste records are separate from the definition, so saving an editor snapshot cannot overwrite them. IDs survive renaming; duplicate labels need not share identity.
+Definition saves use the same per-mission lock as progress publication and reject stale definition revisions. A title-only edit merges freshly published legacy evidence by stable check ID. Evidence/review/Taste records are separate from the definition, so saving an editor snapshot cannot overwrite them. IDs survive renaming; duplicate labels need not share identity. Pinned missions retain workspace context; scoped monitoring excludes unknown or out-of-scope pinned missions when no in-scope workers establish their context.
 
 Run `./scripts/test.sh` and `./scripts/build.sh` after changes. Tests use synthetic data and mock hosts. Offscreen native previews are available without mouse control:
 
@@ -85,4 +85,6 @@ Projection indexes workers, evidence, and judgments by mission/check, and the vi
 
 The local observer still polls and rewrites full snapshots, replays discovered logs on restart, and caps discovery at 100 logs per harness. Queue details are lazy-rendered, but mission selection and team detail are not fleet interfaces. Sidecar history has no retention policy or incremental durable reducer. See [scaling.md](scaling.md) for ingestion, incremental projections, pagination, event ordering, coverage reconciliation, and human-supervision measurements needed next.
 
-The Copilot adversarial-review fixes are developed on a separate branch/PR. Check their merge state before assuming the UI-heartbeat, source-scope, lease, rotation, malformed-input, or mode-switch fixes are included in a build. They overlap mission editing; preserve the stable IDs, locked optimistic saves, and separate evidence records when integrating.
+The Copilot adversarial-review fixes from [PR #1](https://github.com/hehamalainen/SneakPeak/pull/1) are reconciled into this feature branch. The live UI heartbeat, connected-source scope, managed lease, log rotation, malformed-input isolation, and mode-bound acknowledgement fixes are retained. Legacy bare verification and the baseline native persistence writer are replaced by the sidecar-based human action command; native tests exercise that actual transport. See [reliability-contracts.md](reliability-contracts.md).
+
+Claude's separate review examines the remaining same-writer trust boundary. Goal/fingerprint binding protects against stale or accidental reuse; it does not authenticate who wrote a record. Human-action signing, runtime placement, and authenticated source precedence must be evaluated together, including whether a forged full feed can still impersonate an attestation. No signing or identity guarantee is asserted by this feature.

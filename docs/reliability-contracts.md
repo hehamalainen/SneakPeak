@@ -1,0 +1,80 @@
+# Local supervision contracts and review handoff
+
+This document defines the local transport rules for the adversarial-review fixes based on `e5d56d7`, reconciled here with mission checkpoints and Taste. It is a handoff for contributors and reviewers, not a claim of production security or support for thousands of agents.
+
+## Scope applies to every source
+
+`--project` includes the selected directory and its descendants. Transcript observation and connected JSON sources follow the same rule. Connected agents carry a `workspace` string. During scoped monitoring, unknown or out-of-scope workspaces are excluded, including their mission overrides and requests. The built-in Codex, Claude, Copilot, and Antigravity publishers set this metadata.
+
+Older connected-source files without workspace metadata can still appear in unscoped monitoring. They must be republished by an updated adapter to appear in a scoped view. A filtered-out project cannot silently change the goal of an in-scope mission.
+
+## Collector availability and approval availability are different
+
+`state.json` is an observer snapshot; its freshness does not prove a person can see approvals. The native Store separately publishes `approval-surface.json` with:
+
+- `generatedAt`: the surface heartbeat, refreshed by the Store.
+- `live`: whether a readable, connected Live feed is currently displayed.
+- `statePath`: the canonical path of the specific feed being displayed.
+- `provider`: the current source filter (`All sources` or the selected provider).
+
+Codex and Claude require both fresh snapshots and an available surface for their provider and workspace. Demo mode, unreadable feeds, mismatched state paths, incompatible source filters, or a disconnected observer make inline approval unavailable. Future-dated heartbeats beyond a small clock tolerance are rejected. This is a local liveness contract, not an authentication mechanism.
+
+Claude immediately retains or returns to its original approval UI when the surface is unavailable. A managed Codex mission refuses to start without that surface and stops its owned app-server if availability is lost. Availability is checked around message processing as well as during quiet periods; a busy notification stream cannot defeat the check. Switching to Demo therefore interrupts a managed Codex run rather than leaving an invisible approval waiting.
+
+Decisions still carry the exact request ID, agent ID, allowed single-step choice, and timestamp. Expiry cancels or falls back; it does not grant access. Copilot and Antigravity observation hooks do not provide permission decisions.
+
+## Sends and acknowledgements retain their context
+
+The Store retains separate sent-request state for Live and Demo. Switching modes cannot acknowledge an outstanding request from the other mode or erase its sent state. Returning to Live restores that state while the request is still present. Each disappeared request is cleared independently of other requests.
+
+The Live message says that the source request cleared and asks the user to inspect its latest status. Disappearance is not proof that a tool succeeded, a permission was granted, or the mission finished. The underlying Codex adapter continues to wait for the host's request-resolution event after sending a decision.
+
+## Source authority ends with the runner lease
+
+A connected managed source has precedence only while `managed: true`, `active: true`, and its `generatedAt` heartbeat is fresh (15 seconds). Completion and handled interruption publish `active: false`. After authority ends, source and observed records reconcile by their `lastActivity`; an older finished source cannot override a newer resumed session.
+
+The prior review described this stale override as indefinite. It was bounded by the configured history window (24 hours by default), although it could still mislead the user for hours. The fix removes that inappropriate precedence within the window.
+
+Progress overlays replace an agent's current progress only when their `at` is at least as recent as `lastProgress`. Activity timestamps and progress timestamps remain separate. Fresh tool activity alone does not substantiate progress toward a goal.
+
+## Mission edits cannot replace a stale evidence snapshot
+
+Native mission edits and Python checkpoint publishing use the same per-mission advisory lock: `missions/<sha256(id)>.lock`. Atomic JSON replacement protects file completeness; the shared lock protects the read–merge–write operation.
+
+Each definition edit carries a canonical `definitionRevision` hash covering the human definition. The Python command compares that hash under the shared lock against the latest saved definition. A conflicting edit is rejected, the editor remains open, and **Reload latest** lets the person review it. Evidence arriving after an editor opened does not itself cause a definition conflict.
+
+Saves preserve the latest persisted legacy reports by stable checkpoint ID. New evidence and human reviews live in separate sidecars and are not overwritten by definition edits. Changing goal context makes earlier bound evidence stale. Human review verifies only the record fingerprint and goal context the person actually saw, with freshness and local-artifact checks at the time of the action. Python reports using an outdated definition are refused without publishing a misleading progress overlay.
+
+Checkpoint editing uses stable row IDs. Repeated labels remain independent rows, whitespace-only rows are dropped, and persistence refuses duplicate IDs. Text labels never determine identity.
+
+The original standalone fix PR used a native `MissionPersistence` writer for legacy checkpoint fields. This feature branch replaces it with `mission_commands.py` and record-bound reviews; it never verifies bare checkpoint text. Native Store tests now exercise the actual structured Python save transport. The stable row helper remains in `MissionEditing.swift`. See [mission-tracking.md](mission-tracking.md) for the current contract.
+
+## Invalid records and replaced logs are isolated
+
+Connected sources and saved mission/progress records are validated before merging. A malformed file or nested record yields a warning and is skipped while valid records continue updating. Harness IDs are checked before dictionary construction, including malformed array-valued IDs. This prevents the reviewed small malformed inputs from stopping observation; it is not a resource-exhaustion defense for arbitrary file sizes.
+
+Log readers track the device/inode of the opened file in addition to its size. Replacing a log resets its parser/session state even when the replacement is the same size or larger. Partial trailing records remain unread until their newline arrives; truncation also resets the reader.
+
+Antigravity `DONE` interactions clear the matching pending interaction by kind and host identity (`id` or `step_id`) when available. Unrelated identified completions do not clear the current request. Without host IDs, only a completion of the same interaction kind is matched. Overlapping anonymous interactions remain ambiguous; live host fixtures should guide any stronger reconciliation rule.
+
+## Regression coverage and remaining validation
+
+Run `./scripts/test.sh` and `./scripts/build.sh`. Tests and builds use the checkout's own scratch module cache. Tests never launch the app UI, call a model, or alter global harness settings.
+
+| Review finding | Regression coverage |
+| --- | --- |
+| 1. Hidden live approvals in Demo | Real Store surface tests; collector-only refusal; Claude fallback on mode change |
+| 2. Connected-source scope bypass | In/out/unknown workspace tests, goal-override exclusion, scoped surface checks |
+| 3. Stale managed precedence | Active/fresh/expired/stopped lease cases; finished bridge releases authority |
+| 4. Lost mission evidence | Real Store title-save through the Python command; sidecar preservation; stale-definition/report refusal; changed record/artifact rejection |
+| 5. Busy queue bypasses disconnect | Actual runner loop with a synthetic busy queue and stale heartbeat |
+| 6. Old progress overrides new | Older overlay preserves newer evidence and trajectory |
+| 7. Malformed files stop observer | Mixed valid/invalid records through `watch`; invalid registry ID retains valid overrides |
+| 8. Antigravity request never clears | Matching/unrelated identified and anonymous interaction completions |
+| 9. Replacement log is skipped | Equal-sized and larger replacement records reset session identity |
+| 10. Duplicate checkpoint IDs | The editor's stable-row helper preserves duplicate labels and removes blank rows |
+| 11. Cross-mode false acknowledgement | Real Store sends, switches modes, restores pending state, then observes source clearing |
+
+Swift tests now exercise the application Store as well as the Core decision writer. Python tests retain the mock subprocess approval round trip and project-hook preservation checks.
+
+Live Codex/Claude UI behavior, current provider log formats, and Antigravity's actual completion identities still need manual integration tests. Passing these local regressions does not prove successful human supervision at fleet scale. No automatic permission-grant exploit was demonstrated in the original audit.

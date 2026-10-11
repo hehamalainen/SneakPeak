@@ -304,6 +304,27 @@ class MissionTrackingTests(unittest.TestCase):
         self.assertIn("taste", [q["kind"] for q in self.project()["queue"]])
         self.assertFalse((self.directory / "decisions").exists())
 
+    def test_pinned_mission_scope_survives_between_worker_sessions(self):
+        self.mission["workspace"] = "/project-A"
+        atomic_json(self.directory / "missions" / mission_filename("mission-a"), self.mission)
+        self.assertEqual(merge_feed([], [], self.directory, project="/project-B")["missions"], [])
+        self.assertEqual(len(merge_feed([], [], self.directory, project="/project-A")["missions"]), 1)
+        self.mission.pop("workspace")
+        atomic_json(self.directory / "missions" / mission_filename("mission-a"), self.mission)
+        self.assertEqual(merge_feed([], [], self.directory, project="/project-A")["missions"], [])
+
+    def test_malformed_record_numbers_do_not_break_projection_or_native_decoding(self):
+        for invalid in [True, 10**1000]:
+            record = self.evidence()
+            record["observedAt"] = invalid
+            save_record(self.directory, "evidence", record)
+        record = self.evidence()
+        record["localFile"] = {"size": 10**1000, "modifiedNS": "0"}
+        save_record(self.directory, "evidence", record)
+        result = self.project()
+        self.assertEqual(result["missions"][0]["assessment"]["reportedCount"], 0)
+        self.assertEqual(len(result["warnings"]), 3)
+
     def test_a_missing_local_artifact_cannot_be_accepted(self):
         record = self.evidence(reference=str(self.directory / "absent-proof.txt"))
         self.assertEqual(self.project()["missions"][0]["checkpoints"][0]["records"][0]["state"], "missingArtifact")

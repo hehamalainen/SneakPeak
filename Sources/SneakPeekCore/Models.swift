@@ -18,6 +18,7 @@ public struct Mission: Codable, Identifiable, Sendable {
     public var goal: String
     public var checkpoints: [Checkpoint]
     public var owner: String?
+    public var workspace: String?
     public var constraints: [String]?
     public var pinned: Bool?
     public var evidenceMaxAgeSeconds: Double?

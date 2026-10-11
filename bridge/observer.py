@@ -2,6 +2,7 @@
 from __future__ import annotations
 from datetime import datetime
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -32,6 +33,8 @@ class Session:
         self.children = {}
         self.copilot_requests = {}
         self.final_turn = None
+        self.file_identity = None
+        self.antigravity_request_id = None
 
     def initialize(self, session_id: str, cwd: str, parent: str | None = None, name: str | None = None):
         self.cwd = cwd
@@ -176,8 +179,15 @@ class Session:
             # The public transcript may contain a separate `thinking` field. Never read it.
             a.update(summary=short(row.get("content", "")) or "An agent update was observed",
                      status="working" if status == "RUNNING" else "observed")
-        elif kind in {"ASK_QUESTION", "ASK_PERMISSION", "ASK_USER"} and status != "DONE":
-            a.update(status="attention", request=request("Antigravity needs your input", "An interaction step was observed. Open the source session to review and answer it.", mode="handoff", ttl=86400))
+        elif kind in {"ASK_QUESTION", "ASK_PERMISSION", "ASK_USER"}:
+            interaction_id = row.get("id") or row.get("step_id")
+            if status == "DONE":
+                if (kind, interaction_id) == self.antigravity_request_id:
+                    a.update(status="observed", request=None)
+                    self.antigravity_request_id = None
+            else:
+                self.antigravity_request_id = (kind, interaction_id)
+                a.update(status="attention", request=request("Antigravity needs your input", "An interaction step was observed. Open the source session to review and answer it.", mode="handoff", ttl=86400))
         elif kind == "ERROR_MESSAGE" or status == "ERROR":
             a.update(status="attention", summary="Antigravity reported an error. Check the session.")
         elif status == "RUNNING":
@@ -316,10 +326,15 @@ class Session:
 
     def refresh(self):
         try:
-            if self.path.stat().st_size < self.offset:
-                self.offset, self.value, self.has_goal = 0, None, False
-                self.children.clear(); self.copilot_requests.clear(); self.final_turn = None
             with self.path.open("rb") as stream:
+                stat = os.fstat(stream.fileno())
+                identity = (stat.st_dev, stat.st_ino)
+                if identity != self.file_identity or stat.st_size < self.offset:
+                    self.offset, self.value, self.has_goal = 0, None, False
+                    self.mission, self.cwd, self.parent_id, self.pending_call = None, "", None, None
+                    self.children.clear(); self.copilot_requests.clear(); self.final_turn = None
+                    self.antigravity_request_id = None
+                self.file_identity = identity
                 stream.seek(self.offset)
                 while line := stream.readline():
                     if not line.endswith(b"\n"):
@@ -386,6 +401,7 @@ class Observer:
                 missions[mid] = root.mission
             value = dict(session.value)
             value["harnessId"] = session.namespace
+            value["workspace"] = str(scope_cwd) if scope_cwd else ""
             value["missionId"] = mid
             agents.append(value)
         for catalog in self.catalog:

@@ -26,7 +26,7 @@ def context(state, payload):
         latest = json.loads(definition.read_text())
         if latest.get("id") == mid:
             # Keep current records for inspection, but use the latest human goal and checks.
-            for key in ["goal", "constraints", "checkpoints", "evidenceMaxAgeSeconds"]:
+            for key in ["goal", "constraints", "checkpoints", "evidenceMaxAgeSeconds", "workspace"]:
                 if key in latest:
                     mission[key] = latest[key]
     return feed, mission
@@ -43,7 +43,7 @@ def pin_mission(directory, mission):
             if revision(latest) != revision(mission):
                 raise ValueError("The goal changed while this record was being prepared.")
             return
-        definition = {k: mission[k] for k in ["id", "title", "goal", "owner", "constraints", "evidenceMaxAgeSeconds"] if k in mission}
+        definition = {k: mission[k] for k in ["id", "title", "goal", "owner", "constraints", "evidenceMaxAgeSeconds", "workspace"] if k in mission}
         definition["checkpoints"] = [{k: c[k] for k in ["id", "label", "kind", "required", "maxAgeSeconds", "status", "evidence", "source"] if k in c} for c in mission["checkpoints"]]
         definition["pinned"] = True
         atomic_json(target, definition)

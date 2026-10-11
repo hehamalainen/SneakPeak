@@ -7,11 +7,11 @@ from __future__ import annotations
 from collections import defaultdict
 import hashlib
 import json
-import math
 from pathlib import Path
 import time
 import uuid
 from common import atomic_json
+from validation import number
 
 
 def identifier(value):
@@ -24,7 +24,7 @@ def identifier(value):
 def revision(mission):
     checks = [{"id": c["id"], "label": c["label"], "kind": c.get("kind") or "evidence",
                "required": c.get("required") is not False} for c in mission.get("checkpoints", [])]
-    value = {"goal": mission.get("goal", ""), "constraints": mission.get("constraints") or [],
+    value = {"goal": mission.get("goal", ""), "constraints": mission.get("constraints") or [], "workspace": mission.get("workspace"),
              "checks": sorted(checks, key=lambda c: c["id"])}
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
 
@@ -32,7 +32,7 @@ def revision(mission):
 def definition_revision(mission):
     value = {"id": mission["id"], "title": mission["title"], "goal": mission["goal"],
              "owner": mission.get("owner") or "You", "constraints": mission.get("constraints") or [],
-             "pinned": bool(mission.get("pinned")), "evidenceMaxAgeSeconds": mission.get("evidenceMaxAgeSeconds", 86400)}
+             "pinned": bool(mission.get("pinned")), "evidenceMaxAgeSeconds": mission.get("evidenceMaxAgeSeconds", 86400), "workspace": mission.get("workspace")}
     value["checkpoints"] = [{"id": c["id"], "label": c["label"], "kind": c.get("kind") or "evidence",
                             "required": c.get("required") is not False, "maxAgeSeconds": c.get("maxAgeSeconds")} for c in mission.get("checkpoints", [])]
     return hashlib.sha256(json.dumps(value, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
@@ -48,7 +48,7 @@ def read_records(directory: Path, category: str):
             if not isinstance(record.get("missionId"), str) or not isinstance(record.get("goalRevision"), str):
                 raise ValueError("A record needs mission and goal context")
             moment = record.get("observedAt") if category == "evidence" else record.get("createdAt")
-            if not isinstance(moment, (int, float)) or not math.isfinite(moment) or moment < 0:
+            if not number(moment) or moment < 0:
                 raise ValueError("Invalid record timestamp")
             if category == "evidence" and (not isinstance(record.get("checkpointId"), str) or not isinstance(record.get("summary"), str)):
                 raise ValueError("Invalid evidence record")
@@ -59,7 +59,7 @@ def read_records(directory: Path, category: str):
                 if record.get("digest") is not None and not isinstance(record["digest"], str):
                     raise ValueError("Invalid evidence digest")
                 local = record.get("localFile")
-                if local is not None and (not isinstance(local, dict) or not isinstance(local.get("size"), int) or not isinstance(local.get("modifiedNS"), str)):
+                if local is not None and (not isinstance(local, dict) or not isinstance(local.get("size"), int) or isinstance(local.get("size"), bool) or not 0 <= local["size"] < 2**63 or not isinstance(local.get("modifiedNS"), str)):
                     raise ValueError("Invalid local artifact metadata")
             if category == "taste" and (record.get("valence") not in {"right", "off", "uncertain"} or record.get("impact") not in {"note", "review"}):
                 raise ValueError("Invalid taste signal")
@@ -105,7 +105,7 @@ def evidence_state(record, review, goal_revision, max_age, now, demo=False):
     if record.get("goalRevision") != goal_revision:
         return "goalChanged"
     observed = record.get("observedAt")
-    if not isinstance(observed, (int, float)) or not math.isfinite(observed) or observed <= 0 or observed > now + 300:
+    if not number(observed) or observed <= 0 or observed > now + 300:
         return "missingTime"
     if max_age and now - observed > max_age:
         return "stale"
@@ -191,7 +191,7 @@ def project(feed, directory: Path, now=None):
             if feed.get("demo"):
                 records += [dict(e) for e in check.get("exampleEvidence", [])]
             max_age = check.get("maxAgeSeconds", mission.get("evidenceMaxAgeSeconds", 86400))
-            max_age = max_age if isinstance(max_age, (int, float)) and max_age >= 0 else 86400
+            max_age = max_age if number(max_age) and max_age >= 0 else 86400
             for record in records:
                 review = review_by_id.get(record["id"])
                 if feed.get("demo") and record.get("exampleReview") and review is None:

@@ -12,6 +12,7 @@ import SwiftUI
     @Published var selectedAgentId: String?
     @Published var message: String?
     @Published var sentRequests = Set<String>()
+    private var sentByMode: [Bool: Set<String>] = [:]
     @Published var providerFilter = "All sources"
     @Published var recording = false
     @Published var now = Date().timeIntervalSince1970
@@ -26,11 +27,15 @@ import SwiftUI
     var onQueue: ((QueueItem) -> Void)?
     var onShowQueue: (() -> Void)?
     let stateURL: URL
+    private let ownsApprovalSurface: Bool
+    private let missionCommandURL: URL?
     private var timer: Timer?
     private var closeTask: Task<Void, Never>?
     private var recordProcess: Process?
 
-    init(stateURL: URL, demo: Bool) {
+    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil) {
+        self.ownsApprovalSurface = ownsApprovalSurface
+        self.missionCommandURL = missionCommandURL
         self.stateURL = stateURL; showingDemo = demo
         reload()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -81,8 +86,9 @@ import SwiftUI
             feed = newFeed
             if message == "Connecting to local sessions…" { message = nil }
             let pendingIDs = Set(newFeed.agents.compactMap { $0.request?.id })
-            if !sentRequests.isEmpty && sentRequests.isDisjoint(with: pendingIDs) {
-                sentRequests.removeAll()
+            if !sentRequests.subtracting(pendingIDs).isEmpty {
+                sentRequests.formIntersection(pendingIDs)
+                sentByMode[showingDemo] = sentRequests
                 message = showingDemo ? "The example agent received your decision." : "Request cleared by the source · check the latest agent status"
             }
             if !newFeed.missions.contains(where: { $0.id == selectedMissionId }) { selectedMissionId = newFeed.missions.first?.id }
@@ -90,6 +96,20 @@ import SwiftUI
         } catch {
             if feed.generatedAt == 0 { message = "Connecting to local sessions…" }
             else { message = "The local feed could not be read. Check the bridge." }
+            publishApprovalSurface(live: false)
+            return
+        }
+        publishApprovalSurface()
+    }
+    func publishApprovalSurface(live: Bool? = nil) {
+        guard ownsApprovalSurface else { return }
+        let value: [String: Any] = ["generatedAt": Date().timeIntervalSince1970,
+                                   "live": live ?? (!showingDemo && !feed.demo && !disconnected && feed.generatedAt > 0),
+                                   "statePath": stateURL.standardizedFileURL.resolvingSymlinksInPath().path,
+                                   "provider": providerFilter]
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: value) {
+            try? data.write(to: directory.appendingPathComponent("approval-surface.json"), options: .atomic)
         }
     }
     func setExpanded(_ value: Bool) {
@@ -110,11 +130,15 @@ import SwiftUI
         }
     }
     func toggleMode() {
+        publishApprovalSurface(live: false)
+        sentByMode[showingDemo] = sentRequests
         showingDemo.toggle(); selectedMissionId = nil; selectedAgentId = nil; message = nil
+        sentRequests = sentByMode[showingDemo] ?? []
         feed = .empty; reload()
     }
     func filterProvider(_ provider: String) {
         providerFilter = provider
+        publishApprovalSurface()
         selectedMissionId = missions.first?.id; selectedAgentId = nil
     }
     func manageHarnesses() { storeFocus(); onManage?() }
@@ -172,6 +196,7 @@ import SwiftUI
             try DecisionWriter.write(agent: agent, choice: choice.id,
                                      directory: directory.appendingPathComponent("decisions"), now: now)
             sentRequests.insert(request.id)
+            sentByMode[showingDemo] = sentRequests
             message = "Decision sent · waiting for the agent to confirm"
         } catch { message = "This request is no longer available. Open the source session." }
     }
@@ -219,7 +244,7 @@ import SwiftUI
     }
     var currentFeedURL: URL { showingDemo ? directory.appendingPathComponent("demo-state.json") : stateURL }
     func post(_ action: String, payload: [String: Any], completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
-        guard !recording, let script = Bundle.main.resourceURL?.appendingPathComponent("bridge/mission_commands.py") else { return }
+        guard !recording, let script = missionCommandURL ?? Bundle.main.resourceURL?.appendingPathComponent("bridge/mission_commands.py") else { completion?(false); return }
         do {
             let data = try JSONSerialization.data(withJSONObject: payload)
             let process = Process(), input = Pipe(), output = Pipe(), errors = Pipe()

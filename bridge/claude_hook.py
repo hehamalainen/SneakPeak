@@ -7,13 +7,15 @@ import json
 from pathlib import Path
 import sys
 import time
-from common import agent, atomic_json, read_decision, request
+from common import agent, atomic_json, read_decision, request, approval_surface_available
 
 
 def handle(event: dict, state: Path, timeout: float = 120) -> dict:
     if event.get("hook_event_name") != "PermissionRequest":
         return {}
     directory = state.parent
+    if not approval_surface_available(state, "Claude", event.get("cwd", "")):
+        return {}
     try:
         feed = json.loads(state.read_text())
         if time.time() - feed["generatedAt"] > 10:
@@ -26,7 +28,7 @@ def handle(event: dict, state: Path, timeout: float = 120) -> dict:
     aid = "claude:" + sid
     existing = next((a for a in feed.get("agents", []) if a["id"] == aid), None)
     a = dict(existing) if existing else agent(aid, aid, "Claude · " + Path(event.get("cwd", "")).name, "Claude")
-    a["sessionId"] = sid
+    a.update(sessionId=sid, workspace=event.get("cwd", ""))
     mission = next((m for m in feed.get("missions", []) if m["id"] == a["missionId"]),
                    {"id": a["missionId"], "title": "Claude Code", "goal": "Define the outcome for this session", "checkpoints": []})
     tool = event.get("tool_name", "Tool")
@@ -52,7 +54,7 @@ def handle(event: dict, state: Path, timeout: float = 120) -> dict:
             return {"hookSpecificOutput": {"hookEventName": "PermissionRequest", "decision": decision}}
         # If the observer goes away, hand back immediately to Claude's own prompt.
         try:
-            if time.time() - json.loads(state.read_text())["generatedAt"] > 10:
+            if not approval_surface_available(state, "Claude", event.get("cwd", "")):
                 break
         except (OSError, ValueError, KeyError):
             break

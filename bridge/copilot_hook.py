@@ -22,7 +22,7 @@ def handle(event: dict, state: Path, kind: str):
     existing = next((a for a in feed.get("agents", []) if a["id"] == aid), None)
     cwd = event.get("cwd", "")
     a = dict(existing) if existing else agent(aid, aid, "GitHub Copilot · " + (Path(cwd).name or sid[:8]), "GitHub Copilot")
-    a.update(sessionId=sid, sourceApp="GitHub Copilot", harnessId="copilot", lastActivity=time.time())
+    a.update(sessionId=sid, workspace=cwd, sourceApp="GitHub Copilot", harnessId="copilot", lastActivity=time.time())
     mission = next((m for m in feed.get("missions", []) if m["id"] == a["missionId"]),
                    {"id": a["missionId"], "title": Path(cwd).name or "Copilot", "goal": "Define the outcome for this session", "checkpoints": []})
     if kind == "sessionStart":

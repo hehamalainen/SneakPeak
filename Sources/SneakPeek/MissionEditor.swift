@@ -92,8 +92,7 @@ struct MissionEditor: View {
                     updated.constraints = constraints.split(separator: "\n").map { String($0).trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
                     updated.evidenceMaxAgeSeconds = evidenceAge
                     updated.pinned = pinned
-                    updated.checkpoints = checks.filter { !$0.label.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
-                    for i in updated.checkpoints.indices { updated.checkpoints[i].label = updated.checkpoints[i].label.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    updated.checkpoints = MissionEditing.nonblank(checks)
                     save(updated)
                 }.buttonStyle(.borderedProminent).disabled(store.recording || goal.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
