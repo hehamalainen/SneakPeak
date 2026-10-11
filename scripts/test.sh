@@ -2,6 +2,8 @@
 set -euo pipefail
 task_root="${0:A:h:h}"
 cd "$task_root"
+mkdir -p .build/cache
+export CLANG_MODULE_CACHE_PATH="$task_root/.build/cache"
 python3 -m unittest discover -s Tests -v
 # Some Command Line Tools releases package Testing as a framework outside
 # SwiftPM's default search paths. Use the active toolchain's own framework.

@@ -32,3 +32,5 @@ Run `./scripts/test.sh` and `./scripts/build.sh` before proposing changes. GitHu
 ## Adversarial review
 
 Start with [SECURITY.md](SECURITY.md) and [docs/scaling.md](docs/scaling.md). Useful review targets include cross-request or cross-agent decision confusion, expired or replayed replies, malformed or oversized log events, source disconnection, misleading completion/coverage, private text leakage, and project-hook configuration preservation. Tests passing do not establish production security or fleet capacity.
+
+[Local supervision contracts](docs/reliability-contracts.md) defines approval-surface availability, project scope, source freshness, concurrent evidence saves, and the regression handoff from the first adversarial review.

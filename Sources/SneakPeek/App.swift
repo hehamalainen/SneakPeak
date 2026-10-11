@@ -37,7 +37,6 @@ import SwiftUI
             : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("SneakPeek")
         let defaultURL = dataDirectory.appendingPathComponent("state.json")
         let stateURL = argument("--state").map { URL(fileURLWithPath: $0) } ?? defaultURL
-        store = PeekStore(stateURL: stateURL, demo: args.contains("--demo"))
         previewOnly = argument("--render-preview") != nil
         renderingHarnesses = args.contains("--render-harnesses")
         if !previewOnly, let bundleID = Bundle.main.bundleIdentifier,
@@ -45,6 +44,7 @@ import SwiftUI
             DistributedNotificationCenter.default().postNotificationName(Notification.Name("local.sneakpeek.show"), object: nil, userInfo: nil, deliverImmediately: true)
             NSApp.terminate(nil); return
         }
+        store = PeekStore(stateURL: stateURL, demo: args.contains("--demo"), ownsApprovalSurface: !previewOnly)
         if !args.contains("--no-bridge") && !previewOnly { startBridge(stateURL: stateURL, project: argument("--project")) }
         screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
         cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
@@ -196,7 +196,7 @@ import SwiftUI
         window.title = "SneakPeek · mission destination"
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: MissionEditor(mission: mission) { [weak self, weak window] updated in
-            self?.store.saveMission(updated); window?.close()
+            if self?.store.saveMission(updated, base: mission) == true { window?.close() }
         })
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         editor = window
@@ -209,6 +209,7 @@ import SwiftUI
         if let png = bitmap.representation(using: .png, properties: [:]) { try? png.write(to: URL(fileURLWithPath: path)) }
     }
     func applicationWillTerminate(_ notification: Notification) {
+        store?.publishApprovalSurface(live: false)
         if let bridge, bridge.isRunning { bridge.terminate() }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }

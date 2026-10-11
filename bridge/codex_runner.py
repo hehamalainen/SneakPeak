@@ -14,7 +14,7 @@ import subprocess
 import sys
 import threading
 import time
-from common import agent, atomic_json, read_decision, request, short
+from common import agent, atomic_json, read_decision, request, short, approval_surface_available
 
 
 class CodexBridge:
@@ -32,7 +32,7 @@ class CodexBridge:
         sid = thread["id"]
         aid = "codex:" + sid
         self.value = agent(aid, aid, "Codex · " + Path(self.cwd).name, "Codex")
-        self.value.update(sessionId=sid, status="working", summary="Starting the mission")
+        self.value.update(sessionId=sid, workspace=self.cwd, status="working", summary="Starting the mission")
         self.mission = {"id": aid, "title": Path(self.cwd).name, "goal": self.goal, "checkpoints": []}
 
     def receive(self, message: dict):
@@ -119,16 +119,13 @@ class CodexBridge:
         if self.value is not None:
             filename = "codex-run-" + hashlib.sha256(self.value["id"].encode()).hexdigest() + ".json"
             atomic_json(self.directory / "sources" / filename,
-                        {"generatedAt": time.time(), "managed": True, "missions": [self.mission], "agents": [self.value]})
+                        {"generatedAt": time.time(), "managed": True, "active": not self.finished, "missions": [self.mission], "agents": [self.value]})
 
 
 def run(args):
     state = Path(args.state).resolve()
     # Start only when the app is present; otherwise approvals would be invisible.
-    try:
-        if time.time() - json.loads(state.read_text())["generatedAt"] > 10:
-            raise ValueError("Observer disconnected")
-    except (OSError, ValueError, KeyError):
+    if not approval_surface_available(state, "Codex", str(Path(args.project).resolve())):
         raise SystemExit("Start SneakPeek in Live mode before launching a managed Codex mission.")
     process = subprocess.Popen([args.codex, "app-server"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
     messages = queue.Queue()
@@ -151,14 +148,15 @@ def run(args):
     send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "sneakpeek", "title": "SneakPeek", "version": "0.1.0"}}})
     try:
         while not bridge.finished:
+            if not approval_surface_available(state, "Codex", bridge.cwd):
+                raise RuntimeError("The SneakPeek live approval surface disconnected")
             try:
                 message = messages.get(timeout=0.25)
             except queue.Empty:
                 bridge.tick()
-                # Loss of the monitor interrupts rather than leaving an invisible request.
-                if time.time() - json.loads(state.read_text())["generatedAt"] > 15:
-                    raise RuntimeError("The SneakPeek observer disconnected")
                 continue
+            if not approval_surface_available(state, "Codex", bridge.cwd):
+                raise RuntimeError("The SneakPeek live approval surface disconnected")
             if message is None:
                 raise RuntimeError("Codex app-server disconnected")
             if "error" in message:
@@ -175,6 +173,7 @@ def run(args):
             bridge.tick()
     except (KeyboardInterrupt, RuntimeError, OSError, ValueError, KeyError) as error:
         if bridge.value:
+            bridge.finished = True
             bridge.value.update(status="attention", request=None, summary=short(str(error) or "Mission interrupted"), lastActivity=time.time())
             bridge.publish()
         print(str(error), file=sys.stderr)

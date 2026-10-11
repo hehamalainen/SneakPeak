@@ -45,7 +45,12 @@ class Registry:
         hours = settings.get("recentHours", 24)
         self.recent_hours = min(720, max(1, hours)) if isinstance(hours, (float, int)) else 24
         raw = settings.get("harnesses", [])
-        overrides = {x.get("id"): x for x in raw if isinstance(x, dict)} if isinstance(raw, list) else {}
+        overrides = {}
+        for value in raw if isinstance(raw, list) else []:
+            if not isinstance(value, dict) or not isinstance(value.get("id"), str):
+                self.warnings.append("A harness entry has an invalid identifier")
+                continue
+            overrides[value["id"]] = value
         definitions = []
         for base in BUILTINS:
             value = dict(base)
@@ -65,7 +70,7 @@ class Registry:
             if not isinstance(name, str) or not name.strip() or not isinstance(logs, list) or not logs:
                 self.warnings.append("An additional harness needs a name and event log")
                 continue
-            if value.get("format", "sneakpeek") not in FORMATS:
+            if not isinstance(value.get("format", "sneakpeek"), str) or value.get("format", "sneakpeek") not in FORMATS:
                 self.warnings.append("An additional harness has an unsupported event format")
                 continue
             definitions.append({"id": hid, "name": name.strip()[:64], "provider": name.strip()[:64],
