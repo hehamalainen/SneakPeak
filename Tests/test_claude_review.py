@@ -5,6 +5,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import uuid
 import time
 from types import SimpleNamespace
 import unittest
@@ -17,6 +18,8 @@ from claude_hook import handle
 from codex_runner import CodexBridge, run
 from observer import Session
 from peek import merge_feed, mission_filename
+from mission_commands import apply
+from mission_tracking import add_evidence, definition_revision, fingerprint, project, revision, save_record
 
 
 class ClaudeReviewTests(unittest.TestCase):
@@ -149,16 +152,37 @@ class ClaudeReviewTests(unittest.TestCase):
             self.assertEqual('--trusted-local-inline' in command, trusted)
             self.assertEqual(output.stat().st_mode & 0o777, 0o600)
 
-    def test_human_record_is_not_authenticated_by_same_writer_files(self):
-        # A documented unresolved attack. Default host permissions do not fix
-        # projection forgery or add cryptographic proof of a human review.
-        original = agent('codex:one', 'm', 'Observed', 'Codex')
-        mission = {'id': 'm', 'title': 'Goal', 'goal': 'Test', 'checkpoints': []}
-        forged = dict(mission, checkpoints=[{'id': 'c', 'label': 'Check', 'status': 'verified', 'source': 'human', 'evidence': 'Forged'}])
-        atomic_json(self.directory / 'missions' / mission_filename('m'), forged)
-        result = merge_feed([mission], [original], self.directory)
-        self.assertEqual(result['missions'][0]['checkpoints'][0]['status'], 'verified')
-        # Keep this test explicit so a future authenticated projection must update it.
+    def test_same_writer_can_forge_bound_review_despite_content_binding(self):
+        # Known unresolved attack against the actual mission projection, not
+        # the obsolete bare-verification field that the feature now ignores.
+        worker = agent('codex:one', 'm', 'Observed', 'Codex')
+        mission = {'id': 'm', 'title': 'Goal', 'goal': 'Test', 'checkpoints': [
+            {'id': 'c', 'label': 'Check', 'status': 'pending', 'source': 'human', 'evidence': ''}]}
+        report = add_evidence(self.directory, mission, 'c', 'Claimed pass', 'https://example.test/result', 'supports')
+        # No human UI is involved: any writer can construct this review sidecar.
+        save_record(self.directory, 'evidence-reviews', {'id': str(uuid.uuid4()), 'missionId': 'm',
+            'goalRevision': revision(mission), 'evidenceId': report['id'], 'fingerprint': fingerprint(report),
+            'verdict': 'accept', 'createdAt': time.time(), 'actor': 'human'})
+        feed = merge_feed([mission], [worker], self.directory)
+        actual = project(feed, self.directory)['missions'][0]
+        self.assertEqual(actual['checkpoints'][0]['trackingState'], 'accepted')
+        self.assertEqual(actual['assessment']['verifiedCount'], 1)
+
+    def test_pinning_retains_inferred_origin_and_definition_save_marks_local_edit(self):
+        mission = {'id': 'm', 'title': 'Goal', 'goal': 'Inferred context', 'goalOrigin': 'first-prompt', 'checkpoints': []}
+        atomic_json(self.state, {'generatedAt': time.time(), 'demo': False, 'missions': [mission], 'agents': []})
+        apply(self.state, 'taste', {'missionId': 'm', 'goalRevision': revision(mission), 'valence': 'off',
+            'strength': 'hunch', 'note': '', 'impact': 'note', 'acceptance': 'unassessed'})
+        path = self.directory / 'missions' / mission_filename('m')
+        pinned = json.loads(path.read_text())
+        self.assertEqual(pinned['goalOrigin'], 'first-prompt')
+        renamed = dict(pinned, title='A nicer title')
+        apply(self.state, 'definition', {'missionId': 'm', 'definitionRevision': definition_revision(pinned), 'definition': renamed})
+        pinned = json.loads(path.read_text())
+        self.assertEqual(pinned['goalOrigin'], 'first-prompt')
+        edited = dict(pinned, goal='An explicit destination')
+        apply(self.state, 'definition', {'missionId': 'm', 'definitionRevision': definition_revision(pinned), 'definition': edited})
+        self.assertEqual(json.loads(path.read_text())['goalOrigin'], 'local-edit')
 
 
 if __name__ == '__main__': unittest.main()

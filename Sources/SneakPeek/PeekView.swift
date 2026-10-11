@@ -19,7 +19,7 @@ private func agentColor(_ agent: Agent, now: Double) -> Color {
 struct PeekView: View {
     @ObservedObject var store: PeekStore
     let cameraHeight: CGFloat
-    @State private var destination = false
+    @State private var pane = "queue"
     var body: some View {
         VStack(spacing: 0) {
             cameraRow
@@ -70,7 +70,7 @@ struct PeekView: View {
                 }
                 if store.feed.agents.count > 6 { Text("+\(store.feed.agents.count - 6)").font(.system(size: 9)).foregroundStyle(muted) }
             }
-            Text(store.disconnected ? "Connection quiet" : store.attentionCount > 0 ? "\(store.attentionCount) needs you" : store.feed.agents.isEmpty ? "Ready when you are" : "Room to focus")
+            Text(store.disconnected ? "Connection quiet" : store.attentionCount > 0 ? "\(store.attentionCount) decisions" : store.driftCount > 0 ? "\(store.driftCount) course concerns" : store.evidenceGapCount > 0 ? "Evidence incomplete" : store.feed.agents.isEmpty ? "Ready when you are" : "Room to focus")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(store.disconnected ? muted : store.attentionCount > 0 ? amber : mint)
             if store.showingDemo { Text("DEMO").font(.system(size: 7, weight: .bold)).foregroundStyle(muted) }
@@ -118,20 +118,28 @@ struct PeekView: View {
             if let mission = store.mission {
                 missionCard(mission)
                 HStack(spacing: 20) {
-                    tab("The team", selected: !destination) { destination = false }
-                    tab("The destination", selected: destination) { destination = true }
+                    tab("Queue", selected: pane == "queue") { pane = "queue" }
+                    tab("Checkpoints", selected: pane == "checks") { pane = "checks" }
+                    tab("Team", selected: pane == "team") { pane = "team" }
                     Spacer()
                     Text("\(mission.checkpoints.filter(\.verified).count) checked").font(.system(size: 9)).foregroundStyle(muted)
                 }.padding(.top, 18).padding(.bottom, 12)
 
                 ScrollView(showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 9) {
-                        if destination { checkpointView(mission) }
-                        else {
+                        if pane == "checks" { checkpointView(mission) }
+                        else if pane == "team" {
                             ForEach(store.agents) { agent in
                                 agentCard(agent)
                                 if store.selectedAgent?.id == agent.id { detail(agent) }
                             }
+                        } else {
+                            ForEach(Array(store.visibleQueue.prefix(5))) { item in QueueRow(item: item) { store.onQueue?(item) } }
+                            if store.visibleQueue.isEmpty {
+                                Text("No decisions or review items are waiting.").font(.system(size: 12)).foregroundStyle(muted).padding(.vertical, 20)
+                            }
+                            Button("Open the full decision queue ↗") { store.onShowQueue?() }
+                                .buttonStyle(PeekButtonStyle(color: mint))
                         }
                     }.padding(.bottom, 8)
                 }
@@ -158,6 +166,8 @@ struct PeekView: View {
         if store.disconnected { return "A quiet connection.\nTake a closer look." }
         if store.visibleAttentionCount == 1 { return "One decision.\nThen back to flow." }
         if store.visibleAttentionCount > 1 { return "A few decisions.\nOne place to land." }
+        if store.driftCount > 0 { return "A course concern.\nLook at the evidence." }
+        if store.evidenceGapCount > 0 { return "A clearer checkpoint.\nEvidence still missing." }
         return "Room to focus.\nA glance when you need it."
     }
 
@@ -193,9 +203,18 @@ struct PeekView: View {
             Text(mission.goal).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.78)).lineLimit(3).lineSpacing(3)
             HStack(spacing: 5) {
                 Circle().fill(mission.checkpoints.isEmpty ? muted : mint).frame(width: 4, height: 4)
-                Text(mission.checkpoints.isEmpty ? "Destination needs a checkpoint" : "\(mission.checkpoints.filter(\.verified).count) of \(mission.checkpoints.count) landing checks locally reviewed")
+                Text(mission.assessment?.courseLabel ?? "Destination needs a checkpoint")
                     .font(.system(size: 9)).foregroundStyle(muted)
+                Spacer()
+                Button("Taste…") { store.onTaste?(mission, nil) }.font(.system(size: 9)).foregroundStyle(tasteColor).buttonStyle(.plain)
             }.padding(.top, 2)
+            if let assessment = mission.assessment {
+                HStack {
+                    Text(assessment.evidenceLabel).font(.system(size: 9)).foregroundStyle(assessment.evidence == "conflicting" ? amber : muted)
+                    Spacer()
+                    Button("Inspect ↗") { store.onInspectMission?(mission) }.font(.system(size: 9)).foregroundStyle(mint).buttonStyle(.plain)
+                }
+            }
         }.padding(14).background(ink, in: RoundedRectangle(cornerRadius: 14))
         .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.white.opacity(0.07)))
     }
@@ -287,11 +306,12 @@ struct PeekView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(checkpoint.label).font(.system(size: 12, weight: .medium))
                         Text(checkpoint.evidence).font(.system(size: 10)).foregroundStyle(muted).lineSpacing(3)
-                        Text(checkpoint.verified ? "Local review recorded · unsigned" : checkpoint.status == "reported" ? "Reported by an agent · awaiting your review" : "Not checked yet")
+                        Text(checkpoint.kind == "taste" ? (checkpoint.verified ? "Human taste accepted" : "Needs human taste judgment") : checkpoint.verified ? "Local evidence review recorded" : checkpoint.status == "reported" ? "Evidence reported · awaiting review" : checkpoint.status == "rejected" ? "A check was contradicted" : "Evidence missing or stale")
                             .font(.system(size: 9)).foregroundStyle(checkpoint.verified ? mint : muted)
-                        if checkpoint.status == "reported" && !store.showingDemo {
-                            Button("I checked this") { store.verify(checkpoint) }.buttonStyle(PeekButtonStyle(color: mint))
-                        }
+                        Button(checkpoint.kind == "taste" ? "Add Taste" : "Inspect evidence") {
+                            if checkpoint.kind == "taste" { store.onTaste?(mission, checkpoint) }
+                            else { store.onInspectMission?(mission) }
+                        }.buttonStyle(PeekButtonStyle(color: checkpoint.kind == "taste" ? tasteColor : mint))
                     }
                 }.padding(14).frame(maxWidth: .infinity, alignment: .leading).background(ink, in: RoundedRectangle(cornerRadius: 12))
             }

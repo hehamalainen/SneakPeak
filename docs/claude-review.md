@@ -1,13 +1,13 @@
 # Claude adversarial review follow-up
 
-This branch follows Copilot fix `ad4ded0`, not the older reviewed `e5d56d7`. The mission/Taste feature branch separately replaces bare checkpoint verification with evidence records and reviews bound to goal revision and record fingerprint. Those bindings address stale and mismatched evidence; they do not authenticate the reviewer. Reconcile the feature branch deliberately rather than restoring legacy verification code.
+This branch follows merged main `84c0ccb`, which includes Copilot fix `ad4ded0` and mission/Taste features, not the older reviewed `e5d56d7`. Mission/Taste replaces bare checkpoint verification with evidence records and reviews bound to goal revision and record fingerprint. Those bindings address stale and mismatched evidence; they do not authenticate the reviewer. The integration retains the sidecar transport and does not restore legacy verification code.
 
 ## Findings and disposition
 
 | Finding | Verified scope | Change / remaining boundary |
 | --- | --- | --- |
 | Peer-written permission file grants access | Reproduced with synthetic decisions; no dangerous command executes | Default Claude hook returns no permission, low-level reader rejects replies without opt-in, managed Codex runner refuses before starting a child. `--trusted-local-inline` retains the explicitly unsafe local experiment. |
-| Forged human verification | Reproduced by writing a mission override; new sidecars and full feed remain same-writer data | Not authenticated. Baseline UI calls it an unsigned local review. Evidence fingerprints/goal revisions are content-binding, not identity proof. |
+| Forged human verification | Bare verification is rejected by mission tracking, but a forged goal/fingerprint-bound sidecar is accepted; full feed remains same-writer data | Not authenticated. The inspector states that reviews are unsigned local records. Evidence fingerprints/goal revisions are content-binding, not identity proof. |
 | `managed: true` masks observed concerns | Fresh/active lease restriction alone remained forgeable | Removed unconditional lease precedence. Preserve observed goals, unresolved attention/requests, and observed risk; conflicting source or progress claims require inspection. Original logs/feed can still be forged by a writer. |
 | State inside supervised checkout | Default app, runner, publisher and generated hooks used repo `runtime/` | Defaults now agree on `~/Library/Application Support/SneakPeek`. Explicit alternate state remains supported; no automatic import of old data. |
 | Raw Markdown snippets | Compact excerpts retained formatting syntax | Strip common emphasis, code, heading/list and link syntax in display compaction. Never transform approval tool inputs, truncate them, or execute markup. |
@@ -43,8 +43,8 @@ An isolated authenticated IPC/broker or properly sandboxed host connection may b
 
 Primary references: [Apple: protecting keys with the Secure Enclave](https://developer.apple.com/documentation/security/protecting-keys-with-the-secure-enclave), [Apple: Keychain app access groups and code identity](https://developer.apple.com/documentation/security/sharing-access-to-keychain-items-among-a-collection-of-apps), [Apple: user presence access control](https://developer.apple.com/documentation/security/secaccesscontrolcreateflags/userpresence). These support the key and caller constraints; they do not certify this prototype. No OpenSSL verification/signing integration is shipped or claimed here.
 
-## Reconciliation with mission scale work
+## Handoff for further mission work
 
-Keep the newer sidecar evidence/review/definition writer, stable checkpoint IDs, and goal/fingerprint binding from the mission branch. Port `goalOrigin` to its models and preserve it when pinned missions are saved. Native definition edits should set `local-edit`; metadata is not part of evidence truth. The mission queue's permission inspector needs the same opt-in marker guard and source handoff as the baseline view. Signed human provenance remains outstanding for sidecar reviews, Taste decisions, and the entire feed.
+This integration keeps the sidecar evidence/review/definition writer, stable checkpoint IDs, and goal/fingerprint binding. `goalOrigin` is present in the model and retained when inferred missions are pinned; native definition edits set `local-edit`. This metadata is not part of evidence truth. Both permission views require the opt-in marker and retain source handoff. Signed human provenance remains outstanding for sidecar reviews, Taste decisions, and the entire feed.
 
 Apply Application Support defaults to any new command parsers, and retain explicit state paths for all synthetic tests/previews. Source validation must include optional metadata introduced here. Preserve the source scope, live approval-surface heartbeat, mode-bound sends, log replacement detection, optimistic definition locking, invalid-record isolation and acknowledgement rules from Copilot fixes.

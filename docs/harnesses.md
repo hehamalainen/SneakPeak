@@ -1,6 +1,6 @@
 # Harness connections and your first test
 
-SneakPeek 0.2 includes Codex, Claude Code, Antigravity, and GitHub Copilot as permanent choices. They stay in the source picker even when no session is running. A harness is an agent runtime; a session is one conversation or build managed by it.
+SneakPeek 0.3 includes Codex, Claude Code, Antigravity, and GitHub Copilot as permanent choices. They stay in the source picker even when no session is running. A harness is an agent runtime; a session is one conversation or build managed by it.
 
 ## Antigravity and Copilot
 

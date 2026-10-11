@@ -2,7 +2,7 @@
 
 A quiet native Mac companion for long-running agent missions. Hover at the notch to see where the team is heading, what progress has been reported, and which decision needs you. Collapse it and get back to your work.
 
-Version 0.2 is a **local research prototype** supporting **Codex, Claude Code, Antigravity, and GitHub Copilot**, including locally logged subagents. It runs on macOS 14+ with a Swift 6 toolchain (Xcode or Apple's Command Line Tools), Python 3.9+, and zsh. There are no third-party runtime packages, account connections, or inference calls in the observer. **Manage harnesses…** shows every connection even between builds and can register another harness without rebuilding the app.
+Version 0.3.1 is a **local research prototype** supporting **Codex, Claude Code, Antigravity, and GitHub Copilot**, including locally logged subagents. It runs on macOS 14+ with a Swift 6 toolchain (Xcode or Apple's Command Line Tools), Python 3.9+, and zsh. There are no third-party runtime packages, account connections, or inference calls in the observer. **Manage harnesses…** shows every connection even between builds and can register another harness without rebuilding the app.
 
 For the Antigravity/Copilot test and additional harnesses, use the [harness connection guide](docs/harnesses.md).
 
@@ -34,7 +34,9 @@ The app enforces a single running instance; opening it again reveals the existin
 
 Choose a mission and click its pencil. Give it a clear outcome and two or three observable landing checks. A **finished turn** is not the same as a **verified mission**.
 
-The destination view distinguishes pending checks, agent-reported evidence, and checks you have personally reviewed. **I checked this** records an unsigned local review; a writer of the state can forge it. It is not authenticated proof of a human action. First-prompt goals are labeled as inferred until locally edited. The app does not infer goal alignment from tool activity or silently claim a mission is on course.
+**Inspect** opens the mission's evidence. Attach an artifact file or HTTPS reference to a check, inspect it, then choose **Check met** or **Check not met**. Reports remain claims until reviewed; a review is bound to that evidence record and the current goal. Changed goals, aged evidence, and changed local artifacts make an earlier acceptance stale. The app does not infer goal alignment from tool activity. Old bare “verified” labels without bound evidence no longer establish acceptance. Reviews and Taste records are unsigned local claims: a writer of the state can forge them. First-prompt goals are labeled as inferred until locally edited.
+
+The **Queue** distinguishes host decisions and explicit human judgment requests from evidence gaps and suspected drift. Missing evidence is grouped once per mission; the notch shows at most five items, with a separate full queue. **Taste…** records “feels right,” “feels off,” or uncertainty, with optional words. A hunch stays quiet unless you request review. Taste affects acceptance only for checks explicitly defined as **Human taste**. Read the [mission tracking and handoff contract](docs/mission-tracking.md) for semantics, examples, and remaining limits.
 
 Agents can publish a short progress checkpoint:
 
@@ -46,7 +48,7 @@ python3 bridge/peek.py checkpoint \
   --trajectory onCourse
 ```
 
-Use `--checkpoint CHECK_ID` to attach the evidence to a landing check from the selected `state.json`. `atRisk` flags that a human should review the course; `unknown` leaves alignment unassessed. These labels are explicitly agent-reported. Checkpoints preserve the live session's subsequent activity and completion state.
+Use `--checkpoint CHECK_ID --reference /absolute/path/to/test-result.txt` to attach an evidence record to a landing check from the selected `state.json`. Without a reference, a checkpoint is only a progress report. `atRisk` flags that a human should review the course; `unknown` leaves alignment unassessed. These labels are explicitly agent-reported. Checkpoints preserve the live session's subsequent activity and completion state.
 
 ## Decisions and host approvals
 
@@ -99,7 +101,7 @@ Codex handoff attempts the local `codex://threads/…` deep link and also copies
 ./scripts/test.sh
 ```
 
-Tests cover request scope, invalid and expired replies, missing observers, partial log writes, nested subagent grouping, private-reasoning exclusion, checkpoint overlays, Claude hook round trips, a full Codex app-server subprocess round trip with a mock host, and Antigravity foreground/background completion semantics. The script also accommodates the Testing framework location in Apple's Command Line Tools. No model call is made by these tests.
+Tests cover request scope, invalid and expired replies, missing observers, partial log writes, nested subagent grouping, private-reasoning exclusion, checkpoint overlays, Claude hook round trips, a full Codex app-server subprocess round trip with a mock host, and Antigravity foreground/background completion semantics. Mission tests cover evidence freshness and review binding, conflicting reports, stale editor saves, Taste separation, and a synthetic 1,000-mission grouping scenario. A Swift integration test decodes the actual Python projection. These are correctness checks, not a fleet capacity benchmark. The script also accommodates the Testing framework location in Apple's Command Line Tools. No model call is made by these tests.
 
 ## Prototype limits
 
