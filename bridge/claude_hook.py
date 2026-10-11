@@ -10,8 +10,9 @@ import time
 from common import agent, atomic_json, read_decision, request, approval_surface_available
 
 
-def handle(event: dict, state: Path, timeout: float = 120) -> dict:
-    if event.get("hook_event_name") != "PermissionRequest":
+def handle(event: dict, state: Path, timeout: float = 120, *, trusted_local_inline=False) -> dict:
+    # Unsigned peer-written files are never executable permissions by default.
+    if not trusted_local_inline or event.get("hook_event_name") != "PermissionRequest":
         return {}
     directory = state.parent
     if not approval_surface_available(state, "Claude", event.get("cwd", "")):
@@ -35,6 +36,7 @@ def handle(event: dict, state: Path, timeout: float = 120) -> dict:
     # Show the complete tool input. A truncated command must never be approved.
     detail = "Tool: " + tool + "\nProject: " + event.get("cwd", "") + "\n\n" + json.dumps(event.get("tool_input", {}), indent=2, ensure_ascii=False)
     pending = request(f"Allow {tool} for this step?", detail, ttl=timeout)
+    pending["transport"] = "trusted-local-file"
     a.update(status="attention", summary="A permission is waiting for your decision", request=pending, lastActivity=time.time())
     source = directory / "sources" / ("claude-request-" + hashlib.sha256(aid.encode()).hexdigest() + ".json")
 
@@ -43,7 +45,7 @@ def handle(event: dict, state: Path, timeout: float = 120) -> dict:
 
     while time.time() < pending["expiresAt"]:
         publish()
-        answer = read_decision(directory / "decisions", pending, aid)
+        answer = read_decision(directory / "decisions", pending, aid, trusted_local_inline=trusted_local_inline)
         if answer:
             a.update(request=None, status="working", summary="Decision received · returning to Claude", lastActivity=time.time())
             publish()
@@ -67,10 +69,11 @@ def handle(event: dict, state: Path, timeout: float = 120) -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state", required=True)
+    parser.add_argument("--trusted-local-inline", action="store_true", help="Opt in to unsigned local permissions; any writer of this state can forge a reply")
     args = parser.parse_args()
     try:
         event = json.load(sys.stdin)
-        result = handle(event, Path(args.state).resolve())
+        result = handle(event, Path(args.state).resolve(), trusted_local_inline=args.trusted_local_inline)
     except (OSError, ValueError, KeyError, TypeError):
         result = {}  # No JSON decision means normal Claude permission handling.
     print(json.dumps(result))

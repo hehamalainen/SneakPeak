@@ -11,7 +11,11 @@ import unittest
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "bridge"))
-from common import atomic_json, read_decision, request
+from common import atomic_json, request
+from common import read_decision as transport_read_decision
+
+def read_decision(directory, pending, agent_id):
+    return transport_read_decision(directory, pending, agent_id, trusted_local_inline=True)
 from observer import Observer, Session
 from peek import Demo, checkpoint, merge_feed, mission_filename
 from claude_hook import handle
@@ -185,7 +189,7 @@ class BridgeTests(unittest.TestCase):
     def test_claude_hook_round_trip_without_any_model_call(self):
         atomic_json(self.state, {"generatedAt": time.time(), "missions": [], "agents": []})
         result = []
-        worker = threading.Thread(target=lambda: result.append(handle({"hook_event_name": "PermissionRequest", "session_id": "c1", "cwd": "/project", "tool_name": "Bash", "tool_input": {"command": "python3 -m unittest"}}, self.state, timeout=3)))
+        worker = threading.Thread(target=lambda: result.append(handle({"hook_event_name": "PermissionRequest", "session_id": "c1", "cwd": "/project", "tool_name": "Bash", "tool_input": {"command": "python3 -m unittest"}}, self.state, timeout=3, trusted_local_inline=True)))
         worker.start()
         until = time.time() + 2
         source = None
@@ -210,7 +214,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_codex_rpc_decision_waits_for_host_acknowledgement(self):
         sent = []
-        bridge = CodexBridge(self.directory, "Build monitor", "/project", sent.append)
+        bridge = CodexBridge(self.directory, "Build monitor", "/project", sent.append, trusted_local_inline=True)
         bridge.setup({"id": "thread-a"})
         bridge.receive({"id": 81, "method": "item/commandExecution/requestApproval", "params": {"threadId": "different-thread", "command": "ignored"}})
         self.assertFalse(bridge.pending)
@@ -227,7 +231,7 @@ class BridgeTests(unittest.TestCase):
 
     def test_codex_expiry_cancels_instead_of_allowing(self):
         sent = []
-        bridge = CodexBridge(self.directory, "Goal", "/project", sent.append)
+        bridge = CodexBridge(self.directory, "Goal", "/project", sent.append, trusted_local_inline=True)
         bridge.setup({"id": "thread-a"})
         bridge.receive({"id": 9, "method": "item/fileChange/requestApproval", "params": {"threadId": "thread-a"}})
         bridge.value["request"]["expiresAt"] = time.time() - 1
@@ -259,7 +263,7 @@ for line in sys.stdin:
 '''.replace("TRANSCRIPT", repr(str(transcript))))
         mock.chmod(0o700)
         runner = Path(__file__).resolve().parents[1] / "bridge/codex_runner.py"
-        process = subprocess.Popen([sys.executable, str(runner), "--state", str(self.state), "--project", str(self.directory), "--goal", "A safe test mission", "--codex", str(mock)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        process = subprocess.Popen([sys.executable, str(runner), "--state", str(self.state), "--project", str(self.directory), "--goal", "A safe test mission", "--codex", str(mock), "--trusted-local-inline"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         try:
             pending = None
             until = time.time() + 5

@@ -174,6 +174,9 @@ import SwiftUI
     }
     func answer(_ agent: Agent, _ choice: Choice) {
         guard !disconnected, let request = agent.request else { return }
+        guard showingDemo || request.transport == "trusted-local-file" else {
+            message = "Answer this permission in its source session"; return
+        }
         do {
             try DecisionWriter.write(agent: agent, choice: choice.id,
                                      directory: directory.appendingPathComponent("decisions"), now: now)
@@ -222,7 +225,7 @@ import SwiftUI
         guard let mission = mission else { return }
         do {
             try MissionPersistence.verify(checkpoint, base: mission, directory: directory.appendingPathComponent("missions"))
-            message = "Evidence verified"
+            message = "Local review recorded"
         } catch { message = "Evidence changed. Refresh and review the latest report before verifying." }
     }
     func age(_ timestamp: Double) -> String {

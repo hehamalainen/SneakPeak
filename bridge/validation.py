@@ -12,6 +12,8 @@ def number(value):
 def mission(value):
     if not isinstance(value, dict) or not all(isinstance(value.get(k), str) for k in ("id", "title", "goal")):
         raise ValueError("Invalid mission")
+    if value.get("goalOrigin") is not None and not isinstance(value["goalOrigin"], str):
+        raise ValueError("Invalid goal origin")
     checks = value.get("checkpoints")
     if value.get("definitionRevision") is not None and (not isinstance(value["definitionRevision"], int) or isinstance(value["definitionRevision"], bool) or not 0 <= value["definitionRevision"] < 2**63):
         raise ValueError("Invalid definition revision")
@@ -33,13 +35,15 @@ def agent(value):
         raise ValueError("Invalid agent")
     if not all(number(value.get(k)) for k in ("lastActivity", "lastProgress")):
         raise ValueError("Invalid agent timestamp")
-    for key in ("sessionId", "sourceApp", "artifactPath", "harnessId", "handoffKind", "workspace"):
+    for key in ("sessionId", "sourceApp", "artifactPath", "harnessId", "handoffKind", "workspace", "provenance", "progressFreshness", "reportedTrajectory"):
         if value.get(key) is not None and not isinstance(value[key], str):
             raise ValueError("Invalid agent metadata")
     pending = value.get("request")
     if pending is not None:
         if not isinstance(pending, dict) or not all(isinstance(pending.get(k), str) for k in ("id", "title", "detail", "mode")):
             raise ValueError("Invalid request")
+        if pending.get("transport") is not None and not isinstance(pending["transport"], str):
+            raise ValueError("Invalid request transport")
         if not number(pending.get("expiresAt")) or not isinstance(pending.get("choices"), list):
             raise ValueError("Invalid request lifetime or choices")
         for choice in pending["choices"]:

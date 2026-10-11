@@ -45,7 +45,7 @@ class Session:
         self.value["sessionId"] = session_id
         self.value["lastActivity"] = self.path.stat().st_mtime
         self.mission = {"id": mid, "title": Path(cwd).name or "Untitled mission",
-                        "goal": "Define the outcome this session should deliver", "checkpoints": []}
+                        "goal": "Define the outcome this session should deliver", "goalOrigin": "unset", "checkpoints": []}
 
     def consume(self, row: dict):
         now = timestamp(row.get("timestamp"))
@@ -63,6 +63,7 @@ class Session:
     def goal(self, text: str):
         if text and not self.has_goal and not text.startswith(("<environment_context>", "<external_codex")):
             self.mission["goal"] = short(text, 600)
+            self.mission["goalOrigin"] = "first-prompt"
             self.has_goal = True
 
     def codex(self, row: dict, now: float):
@@ -300,6 +301,7 @@ class Session:
         a["lastActivity"] = now
         if row.get("goal"):
             self.goal(row["goal"])
+            self.mission["goalOrigin"] = "source-reported"
         if row.get("summary"):
             a["summary"] = short(row["summary"])
         if kind == "started":

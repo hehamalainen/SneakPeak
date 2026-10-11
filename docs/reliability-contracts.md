@@ -17,7 +17,7 @@ Older connected-source files without workspace metadata can still appear in unsc
 - `statePath`: the canonical path of the specific feed being displayed.
 - `provider`: the current source filter (`All sources` or the selected provider).
 
-Codex and Claude require both fresh snapshots and an available surface for their provider and workspace. Demo mode, unreadable feeds, mismatched state paths, incompatible source filters, or a disconnected observer make inline approval unavailable. Future-dated heartbeats beyond a small clock tolerance are rejected. This is a local liveness contract, not an authentication mechanism.
+In explicit `--trusted-local-inline` mode, Codex and Claude require both fresh snapshots and an available surface for their provider and workspace. Demo mode, unreadable feeds, mismatched state paths, incompatible source filters, or a disconnected observer make inline approval unavailable. Future-dated heartbeats beyond a small clock tolerance are rejected. This is a local liveness contract, not an authentication mechanism.
 
 Claude immediately retains or returns to its original approval UI when the surface is unavailable. A managed Codex mission refuses to start without that surface and stops its owned app-server if availability is lost. Availability is checked around message processing as well as during quiet periods; a busy notification stream cannot defeat the check. Switching to Demo therefore interrupts a managed Codex run rather than leaving an invisible approval waiting.
 
@@ -31,11 +31,11 @@ The Live message says that the source request cleared and asks the user to inspe
 
 ## Source authority ends with the runner lease
 
-A connected managed source has precedence only while `managed: true`, `active: true`, and its `generatedAt` heartbeat is fresh (15 seconds). Completion and handled interruption publish `active: false`. After authority ends, source and observed records reconcile by their `lastActivity`; an older finished source cannot override a newer resumed session.
+A connected source lease (`managed`, `active`, `generatedAt`) describes liveness; a writable JSON claim does not authenticate a producer. The Claude follow-up therefore removes unconditional managed precedence. A newer observed log wins over an older source even when its lease is fresh. A connected source cannot replace an observed mission goal, clear log-observed attention or a pending request, or mask log-observed `atRisk`. Conflicts produce an inspection warning. Current source requests can appear when no observed concern conflicts; other state reconciles by activity time.
 
-The prior review described this stale override as indefinite. It was bounded by the configured history window (24 hours by default), although it could still mislead the user for hours. The fix removes that inappropriate precedence within the window.
+This conservative rule may retain an observed issue until the next log update corroborates its resolution. It does not establish trusted host events and cannot prevent someone modifying the original logs or projected feed. Completion and interruption still publish `active: false`; source scope, surface availability, and malformed-record checks remain in force.
 
-Progress overlays replace an agent's current progress only when their `at` is at least as recent as `lastProgress`. Activity timestamps and progress timestamps remain separate. Fresh tool activity alone does not substantiate progress toward a goal.
+Progress overlays replace current progress only when their `at` is at least as recent as `lastProgress`; an overlay also cannot clear a log-observed risk. A course claim older than one hour, lacking a progress timestamp, or future-dated beyond five seconds becomes `unknown` with `progressFreshness: stale`. Its original claim and timestamp remain available for inspection. Fresh activity alone does not renew the course claim. This window applies to an agent's course label, not to independently reviewed checkpoint records on the mission branch.
 
 ## Mission edits cannot replace a stale evidence snapshot
 
@@ -65,7 +65,7 @@ Run `./scripts/test.sh` and `./scripts/build.sh`. Tests and builds use the check
 | --- | --- |
 | 1. Hidden live approvals in Demo | Real Store surface tests; collector-only refusal; Claude fallback on mode change |
 | 2. Connected-source scope bypass | In/out/unknown workspace tests, goal-override exclusion, scoped surface checks |
-| 3. Stale managed precedence | Active/fresh/expired/stopped lease cases; finished bridge releases authority |
+| 3. Stale managed precedence | Unsigned managed lease cannot override newer observation; finished bridge publishes inactive |
 | 4. Lost mission evidence | Real Store title-save and verification merge; stale-definition/report refusal; changed-evidence rejection |
 | 5. Busy queue bypasses disconnect | Actual runner loop with a synthetic busy queue and stale heartbeat |
 | 6. Old progress overrides new | Older overlay preserves newer evidence and trajectory |
@@ -77,4 +77,4 @@ Run `./scripts/test.sh` and `./scripts/build.sh`. Tests and builds use the check
 
 Swift tests now exercise the application Store as well as the Core decision writer. Python tests retain the mock subprocess approval round trip and project-hook preservation checks.
 
-Live Codex/Claude UI behavior, current provider log formats, and Antigravity's actual completion identities still need manual integration tests. Passing these local regressions does not prove successful human supervision at fleet scale. No automatic permission-grant exploit was demonstrated in the original audit.
+Live Codex/Claude UI behavior, current provider log formats, and Antigravity's actual completion identities still need manual integration tests. Passing these local regressions does not prove successful human supervision at fleet scale. The subsequent Claude review confirmed peer-written decisions can grant permissions in trusted-local mode. Default adapters now refuse those files; the opted-in file transport remains inside the same-account writer trust boundary.

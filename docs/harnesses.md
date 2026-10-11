@@ -21,8 +21,8 @@ Optional hook setup writes `.agents/hooks.json` for Antigravity or `.github/hook
 To configure hooks from a terminal instead of the manager:
 
 ```sh
-python3 bridge/connect.py --provider antigravity --project /absolute/project --state "$PWD/runtime/state.json"
-python3 bridge/connect.py --provider copilot --project /absolute/project --state "$PWD/runtime/state.json"
+python3 bridge/connect.py --provider antigravity --project /absolute/project
+python3 bridge/connect.py --provider copilot --project /absolute/project
 ```
 
 ## Add another harness
@@ -61,6 +61,6 @@ Supported events: `started`, `activity`, `progress`, `needs_input`, `resolved`, 
 
 Only explicit progress evidence updates the course assessment. `needs_input` creates a source handoff, not an executable approval. The generic adapter never imports plugins, executes commands from log entries, or claims it can answer an unknown runtime's permission protocol.
 
-Harness definitions and the history window are stored in `runtime/harnesses.json`. Definitions contain a stable `id`, display `name`, `format`, `logs`, and `enabled` flag. Log paths must be absolute (or start with `~/`). Built-in roots can be customized in that file; additional formats use the same four known parsers or the standard SneakPeek format.
+Harness definitions and the history window are stored in the selected state directory’s `harnesses.json` (by default `~/Library/Application Support/SneakPeek`). Definitions contain a stable `id`, display `name`, `format`, `logs`, and `enabled` flag. Log paths must be absolute (or start with `~/`). Built-in roots can be customized in that file; additional formats use the same four known parsers or the standard SneakPeek format.
 
 References: [Copilot event schema](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/streaming-events), [Copilot hooks](https://docs.github.com/en/copilot/reference/hooks-reference), and [Antigravity hooks](https://www.antigravity.google/docs/hooks).

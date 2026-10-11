@@ -46,6 +46,7 @@ public enum MissionPersistence {
                 }
                 return Checkpoint(id: check.id, label: check.label, status: "pending", evidence: "Awaiting evidence", source: "human")
             }
+            merged.goalOrigin = "local-edit"
             merged.definitionRevision = (current.definitionRevision ?? 0) + 1
             try write(merged, path: path)
         }

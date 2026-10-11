@@ -14,14 +14,15 @@ import subprocess
 import sys
 import threading
 import time
-from common import agent, atomic_json, read_decision, request, short, approval_surface_available
+from common import default_state_path, agent, atomic_json, read_decision, request, short, approval_surface_available
 
 
 class CodexBridge:
     APPROVALS = {"item/commandExecution/requestApproval", "item/fileChange/requestApproval"}
 
-    def __init__(self, directory: Path, goal: str, cwd: str, send):
+    def __init__(self, directory: Path, goal: str, cwd: str, send, *, trusted_local_inline=False):
         self.directory, self.goal, self.cwd, self.send = directory, goal, cwd, send
+        self.trusted_local_inline = trusted_local_inline
         self.value = None
         self.mission = None
         self.pending = {}  # request UUID -> exact JSON-RPC request and agent
@@ -33,7 +34,7 @@ class CodexBridge:
         aid = "codex:" + sid
         self.value = agent(aid, aid, "Codex · " + Path(self.cwd).name, "Codex")
         self.value.update(sessionId=sid, workspace=self.cwd, status="working", summary="Starting the mission")
-        self.mission = {"id": aid, "title": Path(self.cwd).name, "goal": self.goal, "checkpoints": []}
+        self.mission = {"id": aid, "title": Path(self.cwd).name, "goal": self.goal, "goalOrigin": "launch-argument", "checkpoints": []}
 
     def receive(self, message: dict):
         if self.value is None:
@@ -97,6 +98,8 @@ class CodexBridge:
 
     def refresh_request(self):
         first = next(iter(self.pending.values()), None)
+        if first and self.trusted_local_inline:
+            first["request"]["transport"] = "trusted-local-file"
         self.value["request"] = first["request"] if first else None
         self.value["status"] = "attention" if first else "working"
 
@@ -107,7 +110,7 @@ class CodexBridge:
             pending = waiting["request"]
             if waiting["sent"]:
                 continue
-            answer = read_decision(self.directory / "decisions", pending, waiting["agentId"])
+            answer = read_decision(self.directory / "decisions", pending, waiting["agentId"], trusted_local_inline=self.trusted_local_inline)
             if answer or time.time() >= pending["expiresAt"]:
                 # Expiry cancels; it never grants access.
                 self.send({"id": waiting["rpcId"], "result": {"decision": answer or "cancel"}})
@@ -123,6 +126,8 @@ class CodexBridge:
 
 
 def run(args):
+    if not getattr(args, "trusted_local_inline", False):
+        raise SystemExit("Unsigned inline permissions are disabled. Start Codex in its normal UI for host-owned approvals. Use --trusted-local-inline only if every process able to write this state is trusted.")
     state = Path(args.state).resolve()
     # Start only when the app is present; otherwise approvals would be invisible.
     if not approval_surface_available(state, "Codex", str(Path(args.project).resolve())):
@@ -144,7 +149,7 @@ def run(args):
         messages.put(None)
 
     threading.Thread(target=reader, daemon=True).start()
-    bridge = CodexBridge(state.parent, args.goal, str(Path(args.project).resolve()), send)
+    bridge = CodexBridge(state.parent, args.goal, str(Path(args.project).resolve()), send, trusted_local_inline=args.trusted_local_inline)
     send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "sneakpeek", "title": "SneakPeek", "version": "0.1.0"}}})
     try:
         while not bridge.finished:
@@ -189,8 +194,9 @@ def run(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--state", default="runtime/state.json")
+    parser.add_argument("--state", default=str(default_state_path()))
     parser.add_argument("--project", default=".")
     parser.add_argument("--goal", required=True)
     parser.add_argument("--codex", default="codex")
+    parser.add_argument("--trusted-local-inline", action="store_true", help="Opt in to unsigned local permissions; every writer can forge a reply")
     sys.exit(run(parser.parse_args()))
