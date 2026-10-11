@@ -1,6 +1,7 @@
 import Foundation
 import Testing
 import SneakPeekCore
+import CryptoKit
 @testable import SneakPeek
 
 private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
@@ -61,40 +62,46 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     #expect(store.message == "Request cleared by the source · check the latest agent status")
 }
 
-@Test @MainActor func titleEditAndVerificationMergeLatestEvidence() throws {
+@Test @MainActor func titleEditUsesSidecarWriterAndVerificationRequiresInspection() async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
-    let feed = try fixture(directory)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false)
+    _ = try fixture(directory)
+    let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    let state = directory.appendingPathComponent("state.json")
+    let project = Process()
+    project.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+    project.arguments = ["python3", "-c", #"import sys,json; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from mission_tracking import project; p=Path(sys.argv[2]); p.write_text(json.dumps(project(json.loads(p.read_text()),p.parent)))"#, root.appendingPathComponent("bridge").path, state.path]
+    try project.run(); project.waitUntilExit()
+    #expect(project.terminationStatus == 0)
+    let store = PeekStore(stateURL: state, demo: false, missionCommandURL: root.appendingPathComponent("bridge/mission_commands.py"))
+    let feed = store.feed
     let folder = directory.appendingPathComponent("missions")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-    let path = folder.appendingPathComponent(MissionPersistence.fileName("m"))
+    let name = SHA256.hash(data: Data("m".utf8)).map { String(format: "%02x", $0) }.joined() + ".json"
+    let path = folder.appendingPathComponent(name)
     var latest = feed.missions[0]
     latest.checkpoints[1].evidence = "New B from an agent"
     try JSONEncoder().encode(latest).write(to: path, options: .atomic)
+    var inspected = false
+    store.onInspectMission = { _ in inspected = true }
     store.verify(feed.missions[0].checkpoints[0])
     latest = try JSONDecoder().decode(Mission.self, from: Data(contentsOf: path))
-    #expect(latest.checkpoints[0].verified)
+    #expect(inspected)
+    #expect(!latest.checkpoints[0].verified)
     #expect(latest.checkpoints[1].evidence == "New B from an agent")
     var edited = feed.missions[0]; edited.title = "Only title changed"
-    #expect(store.saveMission(edited, base: feed.missions[0]))
-    latest = try JSONDecoder().decode(Mission.self, from: Data(contentsOf: path))
-    #expect(latest.checkpoints[0].verified)
-    #expect(latest.checkpoints[1].evidence == "New B from an agent")
-    #expect(!store.saveMission(edited, base: feed.missions[0])) // stale definition revision
-}
-
-@Test func changedEvidenceCannotBeVerifiedFromLaggingFeed() throws {
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-    defer { try? FileManager.default.removeItem(at: directory) }
-    let base = try fixture(directory).missions[0]
-    var latest = base; latest.checkpoints[0].evidence = "Changed report"
-    try JSONEncoder().encode(latest).write(to: directory.appendingPathComponent(MissionPersistence.fileName("m")))
-    #expect(throws: MissionSaveError.self) {
-        try MissionPersistence.verify(base.checkpoints[0], base: base, directory: directory)
+    let saved = await withCheckedContinuation { continuation in
+        store.saveMission(edited) { continuation.resume(returning: $0) }
     }
+    #expect(saved)
+    latest = try JSONDecoder().decode(Mission.self, from: Data(contentsOf: path))
+    #expect(!latest.checkpoints[0].verified)
+    #expect(latest.checkpoints[1].evidence == "New B from an agent")
+    let stale = await withCheckedContinuation { continuation in
+        store.saveMission(edited) { continuation.resume(returning: $0) }
+    }
+    #expect(!stale)
 }
 
 @Test func rowEditingKeepsDuplicateLabelsIndependentAndFiltersBlanks() {

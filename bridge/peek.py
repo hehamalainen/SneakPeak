@@ -13,6 +13,7 @@ from common import agent, atomic_json, read_decision, request, fresh_timestamp, 
 from validation import agent as valid_agent, mission as valid_mission, number
 from observer import Observer
 from harnesses import Registry, register
+from mission_tracking import project as project_missions, add_evidence, revision, definition_revision, fingerprint
 
 
 def mission_filename(mission_id: str) -> str:
@@ -112,12 +113,20 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                          trajectory=progress["trajectory"], nextStep=progress["nextStep"])
         except (OSError, ValueError, KeyError, TypeError):
             warnings.append("A progress checkpoint could not be read")
-    for mid in list(mission_map):
-        path = directory / "missions" / mission_filename(mid)
+    pinned = set()
+    for mid, mission in mission_map.items():
+        workspaces = {a.get("workspace") for a in by_id.values() if a["missionId"] == mid and a.get("workspace")}
+        if workspaces:
+            mission["workspace"] = str(Path(project).resolve()) if project else next(iter(workspaces)) if len(workspaces) == 1 else None
+    for path in (directory / "missions").glob("*.json"):
         try:
             override = valid_mission(json.loads(path.read_text()))
-            if override["id"] == mid:
+            mid = override["id"]
+            scope = override.get("workspace") or mission_map.get(mid, {}).get("workspace")
+            if path.name == mission_filename(mid) and (mid in mission_map or override.get("pinned")) and workspace_in_scope(scope, project):
                 mission_map[mid] = override
+                if override.get("pinned"):
+                    pinned.add(mid)
         except FileNotFoundError:
             pass
         except (OSError, ValueError, KeyError, TypeError):
@@ -134,7 +143,7 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
             warnings.append(f"{h['name']}: {h['omittedLogs']} recent logs omitted; monitoring coverage is incomplete")
     return {"generatedAt": time.time(), "demo": False, "harnesses": catalog,
             "projectRoot": str(Path(project).resolve()) if project else None,
-            "missions": [m for mid, m in mission_map.items() if mid in active_missions],
+            "missions": [m for mid, m in mission_map.items() if mid in active_missions or mid in pinned],
             "agents": sorted(by_id.values(), key=lambda a: (a["status"] != "attention", -a["lastActivity"])),
             "warnings": warnings}
 
@@ -157,8 +166,10 @@ def watch(args):
         missions, agents = observer.refresh()
         feed = merge_feed(missions, agents, directory, observer.catalog, observer.registry.recent_hours, observer.project)
         feed["warnings"].extend(observer.registry.warnings)
-        atomic_json(path, feed)
-        atomic_json(directory / "demo-state.json", demo.feed(directory))
+        atomic_json(path, project_missions(feed, directory))
+        example = demo.feed(directory)
+        decorate_demo(example, demo.started)
+        atomic_json(directory / "demo-state.json", project_missions(example, directory))
         if args.once:
             break
         time.sleep(1)
@@ -209,7 +220,7 @@ def checkpoint(args):
             if path.exists():
                 saved = json.loads(path.read_text())
                 if saved.get("id") == mission["id"]:
-                    if saved.get("definitionRevision", 0) != mission.get("definitionRevision", 0) or saved.get("goal") != mission.get("goal"):
+                    if definition_revision(saved) != definition_revision(mission):
                         raise SystemExit("Mission changed. Refresh before reporting this landing check.")
                     mission = saved
             check = next((c for c in mission["checkpoints"] if c["id"] == args.checkpoint), None)
@@ -217,9 +228,48 @@ def checkpoint(args):
                 raise SystemExit("Landing check not found. Use a checkpoint id from the state file.")
             check.update(status="reported", evidence=args.evidence, source="agent")
             atomic_json(path, mission)
+            if getattr(args, "reference", None):
+                add_evidence(directory, mission, args.checkpoint, args.evidence, args.reference,
+                             getattr(args, "claim", "supports"), args.agent)
+
     atomic_json(directory / "progress" / filename,
                 {"agentId": a["id"], "at": time.time(), "evidence": args.evidence,
                  "trajectory": args.trajectory, "nextStep": args.next})
+
+
+def evidence_command(args):
+    state = Path(args.state).resolve()
+    feed = json.loads(state.read_text())
+    mission = next((m for m in feed["missions"] if m["id"] == args.mission), None)
+    if mission is None:
+        raise SystemExit("Mission not found in the live feed")
+    result = add_evidence(state.parent, mission, args.checkpoint, args.summary,
+                          args.reference, args.claim, args.actor)
+    print(json.dumps(result, indent=2))
+
+
+def decorate_demo(feed, started):
+    """Trusted, clearly labeled example records; never used by real-source feeds."""
+    mission = feed["missions"][0]
+    mission["owner"] = "You"
+    mission["evidenceMaxAgeSeconds"] = 86400
+    rev = revision(mission)
+    for i, check in enumerate(mission["checkpoints"]):
+        if i == 2:
+            continue  # One missing check makes uncertainty visible.
+        record = {"id": str(__import__("uuid").UUID(int=100 + i)), "missionId": mission["id"],
+                  "checkpointId": check["id"], "goalRevision": rev, "summary": check["evidence"],
+                  "reference": "demo://check/" + check["id"], "verdict": "supports", "source": "report",
+                  "actor": "Example agent", "observedAt": started, "digest": None}
+        if i == 0:
+            record["exampleReview"] = {"evidenceId": record["id"], "goalRevision": rev,
+                                      "fingerprint": fingerprint(record), "verdict": "accept", "createdAt": started}
+        check["exampleEvidence"] = [record]
+    mission["exampleTaste"] = [{"id": str(__import__("uuid").UUID(int=200)), "missionId": mission["id"],
+                               "goalRevision": rev, "valence": "off", "strength": "hunch",
+                               "note": "The flow works, but it feels a little too demanding. I want it to feel calmer.",
+                               "impact": "review", "acceptance": "unassessed", "createdAt": started,
+                               "source": "human", "checkpointId": None}]
 
 
 def main():
@@ -239,6 +289,8 @@ def main():
     progress.add_argument("--next", required=True)
     progress.add_argument("--trajectory", choices=["unknown", "onCourse", "atRisk"], default="unknown")
     progress.add_argument("--checkpoint", help="Optional landing-check id to attach reported evidence to")
+    progress.add_argument("--reference", help="Inspectable evidence file or HTTPS URL")
+    progress.add_argument("--claim", choices=["supports", "contradicts", "unknown"], default="supports")
     progress.set_defaults(handler=checkpoint)
     registration = sub.add_parser("register", help="Add a harness without rebuilding the app")
     registration.add_argument("--state", default="runtime/state.json")
@@ -260,6 +312,15 @@ def main():
     publisher.add_argument("--parent")
     publisher.add_argument("--agent-name")
     publisher.set_defaults(handler=emit)
+    proof = sub.add_parser("evidence", help="Attach an inspectable evidence record to a mission check")
+    proof.add_argument("--state", default="runtime/state.json")
+    proof.add_argument("--mission", required=True)
+    proof.add_argument("--checkpoint", required=True)
+    proof.add_argument("--summary", required=True)
+    proof.add_argument("--reference", required=True)
+    proof.add_argument("--claim", choices=["supports", "contradicts", "unknown"], default="supports")
+    proof.add_argument("--actor", default="agent")
+    proof.set_defaults(handler=evidence_command)
     args = parser.parse_args()
     args.handler(args)
 

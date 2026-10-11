@@ -1,6 +1,6 @@
 # Local supervision contracts and review handoff
 
-This document defines the local transport rules for the adversarial-review fixes based on `e5d56d7`. It is a handoff for contributors and reviewers, not a claim of production security or support for thousands of agents.
+This document defines the local transport rules for the adversarial-review fixes based on `e5d56d7`, reconciled here with mission checkpoints and Taste. It is a handoff for contributors and reviewers, not a claim of production security or support for thousands of agents.
 
 ## Scope applies to every source
 
@@ -41,13 +41,13 @@ Progress overlays replace an agent's current progress only when their `at` is at
 
 Native mission edits and Python checkpoint publishing use the same per-mission advisory lock: `missions/<sha256(id)>.lock`. Atomic JSON replacement protects file completeness; the shared lock protects the read–merge–write operation.
 
-Each definition edit carries its original mission snapshot. The writer checks `definitionRevision` and the original title, goal, and checkpoint identities/labels against the latest saved definition. A conflicting edit is rejected, the editor remains open, and the user is told to reopen the mission. Evidence arriving after an editor opened does not itself cause a definition conflict.
+Each definition edit carries a canonical `definitionRevision` hash covering the human definition. The Python command compares that hash under the shared lock against the latest saved definition. A conflicting edit is rejected, the editor remains open, and **Reload latest** lets the person review it. Evidence arriving after an editor opened does not itself cause a definition conflict.
 
-For unchanged goals and criteria, saves preserve the latest persisted evidence, verification status, and source by stable checkpoint ID. Changing a goal or criterion resets the affected evidence to pending. Human verification also reads the latest mission under that lock and verifies only the evidence/criterion the person actually saw; a changed report is refused. Verification preserves updates to other checkpoints. Python reports using an outdated goal or definition revision are refused without publishing a misleading progress overlay.
+Saves preserve the latest persisted legacy reports by stable checkpoint ID. New evidence and human reviews live in separate sidecars and are not overwritten by definition edits. Changing goal context makes earlier bound evidence stale. Human review verifies only the record fingerprint and goal context the person actually saw, with freshness and local-artifact checks at the time of the action. Python reports using an outdated definition are refused without publishing a misleading progress overlay.
 
 Checkpoint editing uses stable row IDs. Repeated labels remain independent rows, whitespace-only rows are dropped, and persistence refuses duplicate IDs. Text labels never determine identity.
 
-This baseline branch still uses legacy checkpoint fields. The separately developed mission/Taste branch moves evidence and reviews into append-only sidecars and adds its own definition command/revision contract. **Reconcile these overlapping Store/editor/persistence changes deliberately before merging both branches.** The sidecar architecture should retain the concurrency and evidence-binding guarantees above; this baseline writer should not be copied over it blindly.
+The original standalone fix PR used a native `MissionPersistence` writer for legacy checkpoint fields. This feature branch replaces it with `mission_commands.py` and record-bound reviews; it never verifies bare checkpoint text. Native Store tests now exercise the actual structured Python save transport. The stable row helper remains in `MissionEditing.swift`. See [mission-tracking.md](mission-tracking.md) for the current contract.
 
 ## Invalid records and replaced logs are isolated
 
@@ -66,7 +66,7 @@ Run `./scripts/test.sh` and `./scripts/build.sh`. Tests and builds use the check
 | 1. Hidden live approvals in Demo | Real Store surface tests; collector-only refusal; Claude fallback on mode change |
 | 2. Connected-source scope bypass | In/out/unknown workspace tests, goal-override exclusion, scoped surface checks |
 | 3. Stale managed precedence | Active/fresh/expired/stopped lease cases; finished bridge releases authority |
-| 4. Lost mission evidence | Real Store title-save and verification merge; stale-definition/report refusal; changed-evidence rejection |
+| 4. Lost mission evidence | Real Store title-save through the Python command; sidecar preservation; stale-definition/report refusal; changed record/artifact rejection |
 | 5. Busy queue bypasses disconnect | Actual runner loop with a synthetic busy queue and stale heartbeat |
 | 6. Old progress overrides new | Older overlay preserves newer evidence and trajectory |
 | 7. Malformed files stop observer | Mixed valid/invalid records through `watch`; invalid registry ID retains valid overrides |
