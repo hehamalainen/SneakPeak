@@ -9,7 +9,7 @@ import os
 from pathlib import Path
 import signal
 import time
-from common import agent, atomic_json, read_decision, request, fresh_timestamp, workspace_in_scope
+from common import default_state_path, agent, atomic_json, read_decision, request, fresh_timestamp, workspace_in_scope
 from validation import agent as valid_agent, mission as valid_mission, number
 from observer import Observer
 from harnesses import Registry, register
@@ -29,7 +29,7 @@ class Demo:
 
     def feed(self, directory: Path):
         now = time.time()
-        answer = read_decision(directory / "decisions", self.pending, "demo-validation")
+        answer = read_decision(directory / "decisions", self.pending, "demo-validation", trusted_local_inline=True)
         if answer:
             self.answer = answer
         mission = {"id": "demo-mission", "title": "SneakPeek", "goal": "Know when your agents need you. Keep your focus the rest of the time.",
@@ -61,14 +61,16 @@ class Demo:
 
 def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=24, project=None):
     warnings = []
-    by_id = {a["id"]: a for a in agents}
+    by_id = {a["id"]: dict(a, provenance="observed-log") for a in agents}
+    observed_by_id = dict(by_id)
     mission_map = {m["id"]: m for m in missions}
     for path in (directory / "sources").glob("*.json"):
         try:
             source = json.loads(path.read_text())
             if not isinstance(source, dict) or not isinstance(source.get("missions", []), list) or not isinstance(source.get("agents", []), list):
                 raise ValueError("Expected source lists")
-            authority = source.get("managed") is True and source.get("active") is True and fresh_timestamp(source.get("generatedAt"), max_age=15)
+            # A local JSON lease is liveness, never authenticated source authority.
+            # Keep observed goals and concerns even if a source claims managed=True.
             connected = []
             for raw in source.get("agents", []):
                 try:
@@ -85,7 +87,7 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                 except ValueError:
                     warnings.append("An invalid connected mission was skipped")
                     continue
-                if m["id"] in connected_missions and (m["id"] not in mission_map or authority):
+                if m["id"] in connected_missions and m["id"] not in mission_map:
                     mission_map[m["id"]] = m
             for a in connected:
                 hid = a.get("harnessId") or a["id"].split(":")[0]
@@ -97,9 +99,27 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                 if a.get("request") and a["request"].get("mode") == "decision":
                     if time.time() > a["request"]["expiresAt"] or not fresh_timestamp(source.get("generatedAt"), max_age=15):
                         a.update(request=None, status="attention", summary="Approval connection expired. Return to the source session.")
-                observed = by_id.get(a["id"])
-                if observed is None or a.get("request") or authority or a["lastActivity"] >= observed["lastActivity"]:
+                observed = observed_by_id.get(a["id"])
+                current = by_id.get(a["id"])
+                a["provenance"] = "local-source"
+                if current is None:
                     by_id[a["id"]] = a
+                elif a.get("request") or a["lastActivity"] >= current["lastActivity"]:
+                    merged = dict(a)
+                    # An unsigned file cannot clear an observed unresolved request or
+                    # attention state. Wait for the log to corroborate resolution.
+                    if observed and (observed.get("request") or observed["status"] == "attention"):
+                        merged.update(request=observed.get("request"), status=observed["status"],
+                                      summary=observed["summary"])
+                    # New activity is not new evidence. Source claims cannot hide a
+                    # log-observed concern or overwrite more recent observed progress.
+                    if observed and (observed.get("trajectory") == "atRisk" or observed.get("lastProgress", 0) >= a.get("lastProgress", 0)):
+                        for field in ("lastProgress", "evidence", "trajectory", "nextStep"):
+                            merged[field] = observed[field]
+                    if observed and (((observed.get("request") or observed["status"] == "attention") and
+                            (a.get("request") != observed.get("request") or a["status"] != observed["status"])) or (observed.get("trajectory") == "atRisk" and a.get("trajectory") != "atRisk")):
+                        warnings.append("A local source conflicts with an observed concern; inspect the source session")
+                    by_id[a["id"]] = merged
         except (OSError, ValueError, KeyError, TypeError):
             warnings.append("One connected source could not be read")
     for path in (directory / "progress").glob("*.json"):
@@ -109,6 +129,9 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                 raise ValueError("Invalid progress")
             a = by_id.get(progress["agentId"])
             if a and progress["at"] >= a.get("lastProgress", 0):
+                if observed_by_id.get(a["id"], {}).get("trajectory") == "atRisk" and progress["trajectory"] != "atRisk":
+                    warnings.append("A progress report conflicts with an observed concern; inspect the source session")
+                    continue
                 a.update(evidence=progress["evidence"], lastProgress=progress["at"],
                          trajectory=progress["trajectory"], nextStep=progress["nextStep"])
         except (OSError, ValueError, KeyError, TypeError):
@@ -131,6 +154,16 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
             pass
         except (OSError, ValueError, KeyError, TypeError):
             warnings.append("A saved mission could not be read")
+    # Course labels are claims with a freshness window, not durable facts.
+    now = time.time()
+    for a in by_id.values():
+        at = a.get("lastProgress", 0)
+        if a.get("trajectory") in {"onCourse", "atRisk"} and (not at or now - at > 3600 or at > now + 5):
+            a["reportedTrajectory"] = a["trajectory"]
+            a["trajectory"] = "unknown"
+            a["progressFreshness"] = "stale"
+        else:
+            a["progressFreshness"] = "current" if at else "missing"
     active_missions = {a["missionId"] for a in by_id.values()}
     catalog = [dict(h) for h in harnesses or []]
     for h in catalog:
@@ -276,14 +309,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     monitor = sub.add_parser("watch")
-    monitor.add_argument("--state", default="runtime/state.json")
+    monitor.add_argument("--state", default=str(default_state_path()))
     monitor.add_argument("--home", default=str(Path.home()))
     monitor.add_argument("--project", help="Optional exact project directory scope")
     monitor.add_argument("--once", action="store_true")
     monitor.add_argument("--owner-pid", type=int, default=0, help="Stop when the owning app process exits")
     monitor.set_defaults(handler=watch)
     progress = sub.add_parser("checkpoint")
-    progress.add_argument("--state", default="runtime/state.json")
+    progress.add_argument("--state", default=str(default_state_path()))
     progress.add_argument("--agent", required=True)
     progress.add_argument("--evidence", required=True)
     progress.add_argument("--next", required=True)
@@ -293,13 +326,13 @@ def main():
     progress.add_argument("--claim", choices=["supports", "contradicts", "unknown"], default="supports")
     progress.set_defaults(handler=checkpoint)
     registration = sub.add_parser("register", help="Add a harness without rebuilding the app")
-    registration.add_argument("--state", default="runtime/state.json")
+    registration.add_argument("--state", default=str(default_state_path()))
     registration.add_argument("--name", required=True)
     registration.add_argument("--events", help="Absolute event file or log glob; defaults to a new local event file")
     registration.add_argument("--format", choices=["sneakpeek", "codex", "claude", "copilot", "antigravity"], default="sneakpeek")
     registration.set_defaults(handler=register_command)
     publisher = sub.add_parser("emit", help="Publish a standard lifecycle or progress event")
-    publisher.add_argument("--state", default="runtime/state.json")
+    publisher.add_argument("--state", default=str(default_state_path()))
     publisher.add_argument("--harness", required=True)
     publisher.add_argument("--session", required=True)
     publisher.add_argument("--event", choices=["started", "activity", "progress", "needs_input", "resolved", "completed", "failed"], required=True)
@@ -313,7 +346,7 @@ def main():
     publisher.add_argument("--agent-name")
     publisher.set_defaults(handler=emit)
     proof = sub.add_parser("evidence", help="Attach an inspectable evidence record to a mission check")
-    proof.add_argument("--state", default="runtime/state.json")
+    proof.add_argument("--state", default=str(default_state_path()))
     proof.add_argument("--mission", required=True)
     proof.add_argument("--checkpoint", required=True)
     proof.add_argument("--summary", required=True)

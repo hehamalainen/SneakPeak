@@ -26,7 +26,7 @@ def context(state, payload):
         latest = json.loads(definition.read_text())
         if latest.get("id") == mid:
             # Keep current records for inspection, but use the latest human goal and checks.
-            for key in ["goal", "constraints", "checkpoints", "evidenceMaxAgeSeconds", "workspace"]:
+            for key in ["goal", "constraints", "checkpoints", "evidenceMaxAgeSeconds", "workspace", "goalOrigin"]:
                 if key in latest:
                     mission[key] = latest[key]
     return feed, mission
@@ -43,7 +43,7 @@ def pin_mission(directory, mission):
             if revision(latest) != revision(mission):
                 raise ValueError("The goal changed while this record was being prepared.")
             return
-        definition = {k: mission[k] for k in ["id", "title", "goal", "owner", "constraints", "evidenceMaxAgeSeconds", "workspace"] if k in mission}
+        definition = {k: mission[k] for k in ["id", "title", "goal", "owner", "constraints", "evidenceMaxAgeSeconds", "workspace", "goalOrigin"] if k in mission}
         definition["checkpoints"] = [{k: c[k] for k in ["id", "label", "kind", "required", "maxAgeSeconds", "status", "evidence", "source"] if k in c} for c in mission["checkpoints"]]
         definition["pinned"] = True
         atomic_json(target, definition)
@@ -82,6 +82,10 @@ def apply(state: Path, action: str, payload: dict):
                     for key in ["status", "evidence", "source"]:
                         if key in current_check:
                             check[key] = current_check[key]
+            if definition["goal"] != current["goal"]:
+                definition["goalOrigin"] = "local-edit"
+            elif "goalOrigin" in current:
+                definition["goalOrigin"] = current["goalOrigin"]
             atomic_json(target, definition)
         return {"id": mission["id"]}
     if action != "resolve" and payload.get("goalRevision") != rev:

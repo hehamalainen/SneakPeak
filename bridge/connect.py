@@ -7,7 +7,7 @@ from pathlib import Path
 import shlex
 import shutil
 import sys
-from common import atomic_json
+from common import atomic_json, default_state_path
 
 
 def configure(provider: str, project: Path, state: Path):
@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--provider", choices=["antigravity", "copilot"], required=True)
     parser.add_argument("--project", required=True)
-    parser.add_argument("--state", required=True)
+    parser.add_argument("--state", default=str(default_state_path()))
     args = parser.parse_args()
     try:
         print(json.dumps(configure(args.provider, Path(args.project), Path(args.state))))

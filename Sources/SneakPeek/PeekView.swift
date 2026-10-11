@@ -197,6 +197,9 @@ struct PeekView: View {
                 Button { store.onEdit?(mission) } label: { Image(systemName: "pencil").foregroundStyle(muted) }
                     .buttonStyle(.plain).disabled(store.showingDemo).help("Define the goal and landing checks")
             }
+            if mission.goalOrigin == "first-prompt" {
+                Text("Inferred from the first prompt · edit to confirm the goal").font(.system(size: 9)).foregroundStyle(muted)
+            }
             Text(mission.goal).font(.system(size: 12)).foregroundStyle(Color.white.opacity(0.78)).lineLimit(3).lineSpacing(3)
             HStack(spacing: 5) {
                 Circle().fill(mission.checkpoints.isEmpty ? muted : mint).frame(width: 4, height: 4)
@@ -251,7 +254,10 @@ struct PeekView: View {
                     Text(request.title).font(.system(size: 12, weight: .semibold))
                 }.foregroundStyle(amber)
                 Text(request.detail).font(.system(size: 11)).foregroundStyle(Color.white.opacity(0.75)).lineSpacing(3).textSelection(.enabled)
-                if request.canAnswer(at: store.now) && !store.disconnected {
+                if request.canAnswer(at: store.now) && !store.disconnected && (store.showingDemo || request.transport == "trusted-local-file") {
+                    if !store.showingDemo {
+                        Text("Trusted local mode · anyone able to write this state can forge a reply").font(.system(size: 9)).foregroundStyle(amber)
+                    }
                     HStack(spacing: 8) {
                         ForEach(request.choices) { choice in
                             Button(choice.label) { store.answer(agent, choice) }
@@ -263,12 +269,12 @@ struct PeekView: View {
                         Text("Sent. Waiting for confirmation from the agent.").font(.system(size: 9)).foregroundStyle(muted)
                     }
                 } else {
-                    Text(request.mode == "handoff" ? "This session needs your answer at its source." : "Request expired. Check the source session.")
+                    Text(request.mode == "handoff" || request.transport != "trusted-local-file" && !store.showingDemo ? "This session needs your answer at its source." : "Request expired. Check the source session.")
                         .font(.system(size: 10)).foregroundStyle(muted)
                 }
             }
             HStack {
-                Text(agent.trajectory == "atRisk" ? "COURSE NEEDS REVIEW" : agent.trajectory == "onCourse" ? "PROGRESS · AGENT REPORTED" : "COURSE NOT YET CHECKED")
+                Text(agent.progressFreshness == "stale" ? "PROGRESS CLAIM IS STALE" : agent.trajectory == "atRisk" ? "COURSE NEEDS REVIEW" : agent.trajectory == "onCourse" ? "PROGRESS · AGENT REPORTED" : "COURSE NOT YET CHECKED")
                     .font(.system(size: 8, weight: .semibold)).tracking(1).foregroundStyle(agent.trajectory == "atRisk" ? amber : muted)
                 Spacer()
                 Text(store.age(agent.lastProgress)).font(.system(size: 8)).foregroundStyle(muted)
@@ -300,7 +306,7 @@ struct PeekView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(checkpoint.label).font(.system(size: 12, weight: .medium))
                         Text(checkpoint.evidence).font(.system(size: 10)).foregroundStyle(muted).lineSpacing(3)
-                        Text(checkpoint.kind == "taste" ? (checkpoint.verified ? "Human taste accepted" : "Needs human taste judgment") : checkpoint.verified ? "Evidence reviewed by you" : checkpoint.status == "reported" ? "Evidence reported · awaiting review" : checkpoint.status == "rejected" ? "A check was contradicted" : "Evidence missing or stale")
+                        Text(checkpoint.kind == "taste" ? (checkpoint.verified ? "Human taste accepted" : "Needs human taste judgment") : checkpoint.verified ? "Local evidence review recorded" : checkpoint.status == "reported" ? "Evidence reported · awaiting review" : checkpoint.status == "rejected" ? "A check was contradicted" : "Evidence missing or stale")
                             .font(.system(size: 9)).foregroundStyle(checkpoint.verified ? mint : muted)
                         Button(checkpoint.kind == "taste" ? "Add Taste" : "Inspect evidence") {
                             if checkpoint.kind == "taste" { store.onTaste?(mission, checkpoint) }

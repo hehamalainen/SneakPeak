@@ -16,7 +16,10 @@ from common import agent, atomic_json, approval_surface_available, request
 from observer import Observer, Session
 from peek import Demo, checkpoint, merge_feed, mission_filename, watch
 from harnesses import Registry
-from claude_hook import handle
+from claude_hook import handle as hook_handle
+
+def handle(event, state, timeout=120):
+    return hook_handle(event, state, timeout, trusted_local_inline=True)
 import codex_runner
 
 
@@ -78,7 +81,7 @@ class ReviewRegressions(unittest.TestCase):
         self.assertFalse(approval_surface_available(self.state, "Codex", ""))
         self.assertTrue(approval_surface_available(self.state, "Codex", "/project-A/nested"))
 
-    def test_managed_priority_requires_active_fresh_lease(self):
+    def test_managed_json_lease_cannot_override_newer_observation(self):
         old = agent("codex:resumed", "codex:resumed", "Managed", "Codex")
         old.update(status="done", lastActivity=time.time() - 600)
         new = dict(old, status="working", lastActivity=time.time())
@@ -88,7 +91,7 @@ class ReviewRegressions(unittest.TestCase):
             atomic_json(self.root / "sources/old.json", source)
             self.assertEqual(merge_feed([], [new], self.root)["agents"][0]["status"], "working")
         atomic_json(self.root / "sources/old.json", {"generatedAt": time.time(), "managed": True, "active": True, "agents": [old]})
-        self.assertEqual(merge_feed([], [new], self.root)["agents"][0]["status"], "done")
+        self.assertEqual(merge_feed([], [new], self.root)["agents"][0]["status"], "working")
 
     def test_finished_bridge_releases_managed_authority(self):
         bridge = codex_runner.CodexBridge(self.root, "Goal", str(self.root), lambda _: None)
@@ -118,7 +121,7 @@ class ReviewRegressions(unittest.TestCase):
             def kill(self): self.stopped = True
         process = Process()
         with patch.object(codex_runner.subprocess, "Popen", return_value=process), patch.object(codex_runner.queue, "Queue", Messages), patch.object(codex_runner.threading.Thread, "start"):
-            result = codex_runner.run(SimpleNamespace(state=str(self.state), codex="never-executed", project=str(self.root), goal="Synthetic goal"))
+            result = codex_runner.run(SimpleNamespace(state=str(self.state), codex="never-executed", project=str(self.root), goal="Synthetic goal", trusted_local_inline=True))
         self.assertEqual(result, 1)
         self.assertTrue(process.stopped)
         source = json.loads(next((self.root / "sources").glob("*.json")).read_text())

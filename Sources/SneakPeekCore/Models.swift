@@ -24,6 +24,7 @@ public struct Mission: Codable, Identifiable, Sendable {
     public var evidenceMaxAgeSeconds: Double?
     public var goalRevision: String?
     public var definitionRevision: String?
+    public var goalOrigin: String?
     public var assessment: MissionAssessment?
     public var tasteNotes: [TasteSignal]?
 }
@@ -58,6 +59,7 @@ public struct Intervention: Codable, Identifiable, Sendable {
     public var choices: [Choice]
     public var mode: String
     public var expiresAt: Double
+    public var transport: String?
     public func canAnswer(at now: Double) -> Bool {
         mode == "decision" && now < expiresAt && !choices.isEmpty
     }
@@ -80,6 +82,9 @@ public struct Agent: Codable, Identifiable, Sendable {
     public var artifactPath: String?
     public var harnessId: String?
     public var handoffKind: String?
+    public var provenance: String?
+    public var progressFreshness: String?
+    public var reportedTrajectory: String?
     public var request: Intervention?
 
     public func isQuiet(at now: Double) -> Bool { status == "working" && now - lastActivity > 300 }

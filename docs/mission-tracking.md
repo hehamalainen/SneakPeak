@@ -41,11 +41,10 @@ A requested Taste review or human judgment enters the decision queue. Resolving 
 
 ## Local commands for adapters
 
-Get mission and check IDs from the current `runtime/state.json`. Publish a report without pretending it is independently verified:
+Get mission and check IDs from the selected `state.json` (by default `~/Library/Application Support/SneakPeek/state.json`). Publish a report without pretending it is independently verified:
 
 ```sh
 python3 bridge/peek.py evidence \
-  --state runtime/state.json \
   --mission MISSION_ID --checkpoint CHECK_ID \
   --summary 'The acceptance suite passes for this revision.' \
   --reference /absolute/path/to/test-result.txt \
@@ -85,6 +84,6 @@ Projection indexes workers, evidence, and judgments by mission/check, and the vi
 
 The local observer still polls and rewrites full snapshots, replays discovered logs on restart, and caps discovery at 100 logs per harness. Queue details are lazy-rendered, but mission selection and team detail are not fleet interfaces. Sidecar history has no retention policy or incremental durable reducer. See [scaling.md](scaling.md) for ingestion, incremental projections, pagination, event ordering, coverage reconciliation, and human-supervision measurements needed next.
 
-The Copilot adversarial-review fixes from [PR #1](https://github.com/hehamalainen/SneakPeak/pull/1) are reconciled into this feature branch. The live UI heartbeat, connected-source scope, managed lease, log rotation, malformed-input isolation, and mode-bound acknowledgement fixes are retained. Legacy bare verification and the baseline native persistence writer are replaced by the sidecar-based human action command; native tests exercise that actual transport. See [reliability-contracts.md](reliability-contracts.md).
+The Copilot adversarial-review fixes from [PR #1](https://github.com/hehamalainen/SneakPeak/pull/1) are reconciled into this feature branch. The live UI heartbeat, connected-source scope, source liveness, log rotation, malformed-input isolation, and mode-bound acknowledgement fixes are retained. Legacy bare verification and the baseline native persistence writer are replaced by the sidecar-based human action command; native tests exercise that actual transport. See [reliability-contracts.md](reliability-contracts.md).
 
-Claude's separate review examines the remaining same-writer trust boundary. Goal/fingerprint binding protects against stale or accidental reuse; it does not authenticate who wrote a record. Human-action signing, runtime placement, and authenticated source precedence must be evaluated together, including whether a forged full feed can still impersonate an attestation. No signing or identity guarantee is asserted by this feature.
+The [Claude review follow-up](claude-review.md) addresses default permissions, source reconciliation, runtime placement, inferred goals and stale course claims while retaining the remaining same-writer trust boundary. Permissions stay in the host UI by default; `--trusted-local-inline` explicitly opts into unsigned replies. Goal/fingerprint binding protects against stale or accidental reuse; it does not authenticate who wrote a record. Human-action signing, runtime placement, and authenticated source precedence must be evaluated together, including whether a forged full feed can still impersonate an attestation. No signing or identity guarantee is asserted by this feature.

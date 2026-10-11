@@ -69,7 +69,7 @@ struct MissionInspector: View {
                         }
                     }
                 }
-                Text("Evidence and human taste have different origins. A finished agent turn does not establish that these checks are met.")
+                Text("Evidence and Taste have different origins. Reviews are unsigned local records; a state writer can forge them. A finished turn does not establish that these checks are met.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("This mission is no longer available.").foregroundStyle(.secondary)
@@ -155,7 +155,10 @@ struct QueueInspector: View {
                         }
                         if item.kind == "runtime", let agent = store.feed.agents.first(where: { $0.id == item.agentId }),
                            let request = agent.request, request.id == item.requestId {
-                            if request.canAnswer(at: store.now) && !store.disconnected {
+                            if request.canAnswer(at: store.now) && !store.disconnected && (store.showingDemo || request.transport == "trusted-local-file") {
+                                if !store.showingDemo {
+                                    Text("Trusted local mode · anyone able to write this state can forge a reply").font(.caption).foregroundStyle(reviewColor)
+                                }
                                 HStack {
                                     ForEach(request.choices) { choice in
                                         Button(choice.label) { store.answer(agent, choice) }
@@ -164,6 +167,9 @@ struct QueueInspector: View {
                                 }.buttonStyle(.borderedProminent)
                                 Text("The reply is scoped to this host request. It stays pending until the host confirms.")
                                     .font(.caption).foregroundStyle(.secondary)
+                            }
+                            if !store.showingDemo && request.transport != "trusted-local-file" {
+                                Text("Answer this permission in its source session.").font(.caption).foregroundStyle(.secondary)
                             }
                             Button("Open source session") { store.open(agent) }.buttonStyle(.bordered)
                         } else if ["taste", "judgment"].contains(item.kind) {

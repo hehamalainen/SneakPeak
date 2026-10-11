@@ -55,7 +55,7 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var reviewedAt: Double?
     public var stateLabel: String {
         switch state {
-        case "accepted": return "Check met · human review"
+        case "accepted": return "Check met · local review"
         case "rejected": return "Check not met · human review"
         case "stale": return "Evidence aged beyond its window"
         case "goalChanged": return "Evidence refers to an earlier goal"

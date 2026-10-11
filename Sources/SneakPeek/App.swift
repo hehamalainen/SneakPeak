@@ -34,10 +34,7 @@ import SwiftUI
             guard let index = args.firstIndex(of: key), index + 1 < args.count else { return nil }
             return args[index + 1]
         }
-        let bundleParent = Bundle.main.bundleURL.deletingLastPathComponent()
-        let dataDirectory = bundleParent.lastPathComponent == "dist"
-            ? bundleParent.deletingLastPathComponent().appendingPathComponent("runtime")
-            : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("SneakPeek")
+        let dataDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("SneakPeek")
         let defaultURL = dataDirectory.appendingPathComponent("state.json")
         let stateURL = argument("--state").map { URL(fileURLWithPath: $0) } ?? defaultURL
         previewOnly = argument("--render-preview") != nil

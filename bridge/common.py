@@ -3,10 +3,16 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 from pathlib import Path
 import tempfile
 import time
 import uuid
+
+
+def default_state_path() -> Path:
+    """Keep supervision state outside a supervised checkout by default."""
+    return Path.home() / "Library" / "Application Support" / "SneakPeek" / "state.json"
 
 
 def fresh_timestamp(value, *, max_age: float = 10) -> bool:
@@ -60,9 +66,9 @@ def request(title: str, detail: str, *, mode: str = "decision", ttl: float = 300
             "mode": mode, "expiresAt": time.time() + ttl}
 
 
-def read_decision(directory: Path, pending: dict, agent_id: str) -> str | None:
+def read_decision(directory: Path, pending: dict, agent_id: str, *, trusted_local_inline=False) -> str | None:
     """A reply is scoped to the exact outstanding request and has a short lifetime."""
-    if time.time() >= pending["expiresAt"]:
+    if not trusted_local_inline or time.time() >= pending["expiresAt"]:
         return None
     try:
         uuid.UUID(pending["id"])
@@ -86,6 +92,11 @@ def agent(agent_id: str, mission_id: str, name: str, provider: str) -> dict:
 
 def short(text: str, limit: int = 220) -> str:
     # Only visible messages, never private reasoning or raw tool output.
+    # Compact display excerpts only. Raw approval tool inputs bypass this helper.
+    text = re.sub(r"!\[([^]\n]*)\]\([^)\n]*\)", r"\1", text)
+    text = re.sub(r"\[([^]\n]+)\]\([^)\n]*\)", r"\1", text)
+    text = re.sub(r"(?m)^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+)", "", text)
+    text = re.sub(r"(`{1,3}|\*\*|__|~~)(.+?)\1", r"\2", text, flags=re.S)
     return " ".join(text.strip().split())[:limit]
 
 

@@ -13,7 +13,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
         "agents": demo ? [] : [["id": "claude:one", "missionId": "m", "name": "One", "provider": "Claude",
             "status": "attention", "summary": "Waiting", "lastActivity": now, "lastProgress": now,
             "evidence": "Original A", "nextStep": "Review", "trajectory": "unknown",
-            "request": ["id": UUID().uuidString, "title": "Allow?", "detail": "A synthetic command", "mode": "decision",
+            "request": ["id": UUID().uuidString, "title": "Allow?", "detail": "A synthetic command", "mode": "decision", "transport": "trusted-local-file",
                         "choices": [["id": "accept", "label": "Allow once"]], "expiresAt": now + 300]]]]
     let encoded = try JSONSerialization.data(withJSONObject: data)
     try encoded.write(to: directory.appendingPathComponent(demo ? "demo-state.json" : "state.json"))
@@ -111,4 +111,18 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     let edited = MissionEditing.nonblank(rows)
     #expect(edited.map(\.id) == ["a", "b"])
     #expect(edited.map(\.evidence) == ["A", "B"])
+}
+
+@Test @MainActor func unmarkedLiveRequestCannotWriteUnsignedDecision() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false)
+    var agent = store.feed.agents[0]
+    agent.request?.transport = nil
+    store.answer(agent, agent.request!.choices[0])
+    #expect(store.sentRequests.isEmpty)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
+    #expect(store.message == "Answer this permission in its source session")
 }

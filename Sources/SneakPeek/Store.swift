@@ -192,6 +192,9 @@ import SwiftUI
     }
     func answer(_ agent: Agent, _ choice: Choice) {
         guard !disconnected, let request = agent.request else { return }
+        guard showingDemo || request.transport == "trusted-local-file" else {
+            message = "Answer this permission in its source session"; return
+        }
         do {
             try DecisionWriter.write(agent: agent, choice: choice.id,
                                      directory: directory.appendingPathComponent("decisions"), now: now)

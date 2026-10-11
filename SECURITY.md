@@ -1,20 +1,24 @@
 # Security and privacy
 
-SneakPeek observes local logs and can send replies through explicitly connected approval adapters. It is a research prototype, not a security boundary. Anyone able to modify its state directory or provider logs operates within the local trust boundary. Do not expose the file transport to a network share or an untrusted account.
+SneakPeek observes local logs and hands permissions back to the host UI by default. Unsigned file-based inline approval adapters require an explicit `--trusted-local-inline` opt-in. It is a research prototype, not a security boundary. Anyone able to modify its state directory or provider logs operates within the local trust boundary. A supervised agent able to write that directory can forge a human review, source lease, projected feed, or an opted-in approval. Supervisees must not be assumed trustworthy merely because they share your account. Do not expose the transport to a network share or an untrusted account.
 
 ## Data handling
 
 The observer retains visible prompt/message excerpts, project paths, session IDs, progress evidence, and approval inputs in local runtime files. It excludes private reasoning fields in known parsers. Unknown or changed provider schemas can break that assumption and need review. There is no application cloud upload or inference call in the observer. Provider CLIs run through the Codex adapter retain their own normal network behavior and model usage.
 
+Default state lives in `~/Library/Application Support/SneakPeek`, outside the checkout; explicit `--state` paths remain supported and old repo-local state is not automatically imported. Moving the directory avoids some agents’ workspace-write scope but does not prevent another process running as the same user from accessing it.
+
 `runtime/`, build outputs, environment files, and preview screenshots are excluded from Git. Exclusion is not encryption or a retention policy: files can remain locally after the app exits. Review local filesystem permissions and delete sensitive state when no longer required. Share synthetic examples instead of raw runtime files or transcripts.
 
 ## Decisions and adapters
 
-Connected decisions are bound to a request ID, agent ID, available choice, and expiry. The UI waits for source acknowledgement. A missing or expired reply never grants permission. Claude timeout returns to the host's normal permission handling. Codex cancellation/disconnection handling belongs to the included runner, not another client's session.
+In trusted-local mode, connected decisions are bound to a request ID, agent ID, available choice, and expiry. The UI waits for source acknowledgement. These checks prevent accidental misrouting and expiry mistakes; they do not authenticate who wrote the reply. A missing or expired reply never grants permission. Claude timeout returns to the host's normal permission handling. Codex cancellation/disconnection handling belongs to the included runner, not another client's session.
 
 Antigravity, GitHub Copilot, and generic harnesses currently provide observation and source handoff; they do not accept executable approvals through SneakPeek. Adding a harness is data registration, not plugin execution. Logs and summaries are untrusted content and must never become commands or policy instructions.
 
-Known gaps include no authenticated remote transport, no tamper-evident audit log, no enterprise authorization model, no bounded adversarial input/load guarantee, and no notarized distribution. See [the scaling proposal](docs/scaling.md) for future requirements.
+First-prompt goals are inferred, not human-confirmed. A local `source: human` field, sidecar review, record fingerprint, or green checkpoint is not proof of human identity. Connected `managed: true` JSON is no longer granted authenticated precedence, but both logs and source files remain forgeable within the local writer boundary. See [the Claude review and authentication design requirements](docs/claude-review.md).
+
+Known gaps include no authenticated human-action or projection transport, no authenticated remote transport, no tamper-evident audit log, no enterprise authorization model, no bounded adversarial input/load guarantee, and no notarized distribution. See [the scaling proposal](docs/scaling.md) for future requirements.
 
 ## Reporting
 
