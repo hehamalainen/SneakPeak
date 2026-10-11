@@ -7,6 +7,7 @@ public struct Feed: Codable, Sendable {
     public var agents: [Agent]
     public var warnings: [String]?
     public var harnesses: [HarnessInfo]?
+    public var queue: [QueueItem]?
     public static let empty = Feed(generatedAt: 0, demo: false, missions: [], agents: [])
     public func isDisconnected(at now: Double) -> Bool { !demo && now - generatedAt > 10 }
 }
@@ -16,6 +17,14 @@ public struct Mission: Codable, Identifiable, Sendable {
     public var title: String
     public var goal: String
     public var checkpoints: [Checkpoint]
+    public var owner: String?
+    public var constraints: [String]?
+    public var pinned: Bool?
+    public var evidenceMaxAgeSeconds: Double?
+    public var goalRevision: String?
+    public var definitionRevision: String?
+    public var assessment: MissionAssessment?
+    public var tasteNotes: [TasteSignal]?
 }
 
 public struct Checkpoint: Codable, Identifiable, Sendable {
@@ -24,9 +33,15 @@ public struct Checkpoint: Codable, Identifiable, Sendable {
     public var status: String
     public var evidence: String
     public var source: String
+    public var kind: String?
+    public var required: Bool?
+    public var trackingState: String?
+    public var records: [EvidenceRecord]?
+    public var maxAgeSeconds: Double?
     public var verified: Bool { status == "verified" }
-    public init(id: String, label: String, status: String, evidence: String, source: String) {
+    public init(id: String, label: String, status: String, evidence: String, source: String, kind: String? = nil, required: Bool? = nil) {
         self.id = id; self.label = label; self.status = status; self.evidence = evidence; self.source = source
+        self.kind = kind; self.required = required
     }
 }
 
@@ -76,7 +91,7 @@ public struct Agent: Codable, Identifiable, Sendable {
         switch status {
         case "working": return "Working"
         case "done": return "Turn finished"
-        case "attention": return "Needs you"
+        case "attention": return "Needs inspection"
         case "observed": return "Update observed"
         default: return "Idle"
         }

@@ -22,6 +22,9 @@ import SwiftUI
     private var screen: NSScreen?
     private var previewOnly = false
     private var renderingHarnesses = false
+    private var trackingPreview = ""
+    private var trackingWindow: NSWindow?
+    private var formWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -40,6 +43,7 @@ import SwiftUI
         store = PeekStore(stateURL: stateURL, demo: args.contains("--demo"))
         previewOnly = argument("--render-preview") != nil
         renderingHarnesses = args.contains("--render-harnesses")
+        trackingPreview = args.contains("--render-inspector") ? "inspector" : args.contains("--render-taste") ? "taste" : args.contains("--render-queue") ? "queue" : ""
         if !previewOnly, let bundleID = Bundle.main.bundleIdentifier,
            NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).contains(where: { $0.processIdentifier != ProcessInfo.processInfo.processIdentifier && !$0.isTerminated }) {
             DistributedNotificationCenter.default().postNotificationName(Notification.Name("local.sneakpeek.show"), object: nil, userInfo: nil, deliverImmediately: true)
@@ -55,11 +59,20 @@ import SwiftUI
         panel.isFloatingPanel = true; panel.hidesOnDeactivate = false
         panel.isMovable = false; panel.isReleasedWhenClosed = false
         if previewOnly && renderingHarnesses { panel.contentView = NSHostingView(rootView: HarnessManager(store: store)) }
+        else if previewOnly && trackingPreview == "inspector", let mission = store.mission { panel.contentView = NSHostingView(rootView: MissionInspector(store: store, missionId: mission.id)) }
+        else if previewOnly && trackingPreview == "taste", let mission = store.mission { panel.contentView = NSHostingView(rootView: TasteEditor(store: store, mission: mission, checkpoint: nil, close: {})) }
+        else if previewOnly && trackingPreview == "queue" { panel.contentView = NSHostingView(rootView: QueueManager(store: store)) }
         else { panel.contentView = NSHostingView(rootView: PeekView(store: store, cameraHeight: cameraHeight)) }
         store.onResize = { [weak self] in self?.position(animated: true) }
         store.onEdit = { [weak self] mission in self?.edit(mission) }
         store.onManage = { [weak self] in self?.manage() }
         store.onSetup = { [weak self] harness in self?.setup(harness) }
+        store.onInspectMission = { [weak self] mission in self?.inspect(mission) }
+        store.onTaste = { [weak self] mission, checkpoint in self?.taste(mission, checkpoint: checkpoint) }
+        store.onEvidence = { [weak self] mission, checkpoint in self?.evidence(mission, checkpoint: checkpoint) }
+        store.onJudgment = { [weak self] mission in self?.judgment(mission) }
+        store.onQueue = { [weak self] item in self?.inspectQueue(item) }
+        store.onShowQueue = { [weak self] in self?.queueManager() }
         if previewOnly {
             store.pinned = true; store.setExpanded(true); position(animated: false)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
@@ -105,8 +118,8 @@ import SwiftUI
 
     private func position(animated: Bool) {
         guard let screen = screen ?? NSScreen.main else { return }
-        let width: CGFloat = renderingHarnesses ? 615 : store.expanded ? 470 : 320
-        let height: CGFloat = renderingHarnesses ? 720 : store.expanded ? min(710, screen.frame.height - 80) : cameraHeight + 33
+        let width: CGFloat = renderingHarnesses ? 615 : !trackingPreview.isEmpty ? 640 : store.expanded ? 470 : 320
+        let height: CGFloat = renderingHarnesses || !trackingPreview.isEmpty ? 735 : store.expanded ? min(710, screen.frame.height - 80) : cameraHeight + 33
         let rect = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
         if animated {
             NSAnimationContext.runAnimationGroup { context in
@@ -141,18 +154,59 @@ import SwiftUI
         let peek = menu.addItem(withTitle: "Peek at agents", action: #selector(togglePeek), keyEquivalent: "p"); peek.target = self
         let demo = menu.addItem(withTitle: "Switch live / example", action: #selector(toggleDemo), keyEquivalent: "d"); demo.target = self
         let harnesses = menu.addItem(withTitle: "Manage harnesses…", action: #selector(manage), keyEquivalent: "h"); harnesses.target = self
+        let queue = menu.addItem(withTitle: "Decision queue…", action: #selector(queueManager), keyEquivalent: "j"); queue.target = self
         menu.addItem(.separator())
         let quit = menu.addItem(withTitle: "Quit SneakPeek", action: #selector(quit), keyEquivalent: "q"); quit.target = self
         statusItem.menu = menu
     }
     private func updateMenuIcon() {
         statusItem?.button?.contentTintColor = store.attentionCount > 0 ? NSColor.systemOrange : NSColor.secondaryLabelColor
-        statusItem?.button?.toolTip = store.attentionCount > 0 ? "\(store.attentionCount) agents need you" : "SneakPeek · room to focus"
+        statusItem?.button?.toolTip = store.attentionCount > 0 ? "\(store.attentionCount) decisions need you" : "SneakPeek · room to focus"
     }
     @objc private func togglePeek() { store.pinned = !store.expanded; store.setExpanded(!store.expanded) }
     @objc private func toggleDemo() { store.toggleMode(); store.pinned = true; store.setExpanded(true) }
     @objc private func showPeek() { store.pinned = true; store.setExpanded(true); panel.orderFrontRegardless() }
     @objc private func quit() { NSApp.terminate(nil) }
+
+    private func window(title: String, width: CGFloat = 640, height: CGFloat = 735) -> NSWindow {
+        store.pinned = true
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: height), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        window.title = title; window.isReleasedWhenClosed = false
+        return window
+    }
+    private func show(_ window: NSWindow) {
+        window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+    }
+    private func inspect(_ mission: Mission) {
+        let pane = window(title: "SneakPeek · mission evidence")
+        pane.contentView = NSHostingView(rootView: MissionInspector(store: store, missionId: mission.id))
+        show(pane); trackingWindow = pane
+    }
+    private func inspectQueue(_ item: QueueItem) {
+        let pane = window(title: "SneakPeek · \(item.kindLabel)", width: 620, height: 565)
+        pane.contentView = NSHostingView(rootView: QueueInspector(store: store, itemId: item.id))
+        show(pane); trackingWindow = pane
+    }
+    @objc private func queueManager() {
+        let pane = window(title: "SneakPeek · decision queue", width: 625, height: 720)
+        pane.contentView = NSHostingView(rootView: QueueManager(store: store))
+        show(pane); trackingWindow = pane
+    }
+    private func taste(_ mission: Mission, checkpoint: Checkpoint?) {
+        let pane = window(title: "SneakPeek · human Taste", width: 600, height: 740)
+        pane.contentView = NSHostingView(rootView: TasteEditor(store: store, mission: mission, checkpoint: checkpoint) { [weak pane] in pane?.close() })
+        show(pane); formWindow = pane
+    }
+    private func evidence(_ mission: Mission, checkpoint: Checkpoint) {
+        let pane = window(title: "SneakPeek · attach evidence", width: 600, height: 540)
+        pane.contentView = NSHostingView(rootView: EvidenceEditor(store: store, mission: mission, checkpoint: checkpoint) { [weak pane] in pane?.close() })
+        show(pane); formWindow = pane
+    }
+    private func judgment(_ mission: Mission) {
+        let pane = window(title: "SneakPeek · request human judgment", width: 610, height: 535)
+        pane.contentView = NSHostingView(rootView: JudgmentEditor(store: store, mission: mission) { [weak pane] in pane?.close() })
+        show(pane); formWindow = pane
+    }
 
     @objc private func manage() {
         store.pinned = true
@@ -192,11 +246,11 @@ import SwiftUI
 
     private func edit(_ mission: Mission) {
         store.pinned = true
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 536, height: 540), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 710), styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "SneakPeek · mission destination"
         window.isReleasedWhenClosed = false
-        window.contentView = NSHostingView(rootView: MissionEditor(mission: mission) { [weak self, weak window] updated in
-            self?.store.saveMission(updated); window?.close()
+        window.contentView = NSHostingView(rootView: MissionEditor(store: store, mission: mission) { [weak self, weak window] updated in
+            self?.store.saveMission(updated) { [weak window] success in if success { window?.close() } }
         })
         window.center(); window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         editor = window

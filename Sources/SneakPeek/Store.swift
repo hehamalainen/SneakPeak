@@ -1,5 +1,4 @@
 import AppKit
-import CryptoKit
 import Foundation
 import SneakPeekCore
 import SwiftUI
@@ -14,14 +13,22 @@ import SwiftUI
     @Published var message: String?
     @Published var sentRequests = Set<String>()
     @Published var providerFilter = "All sources"
+    @Published var recording = false
     @Published var now = Date().timeIntervalSince1970
     var onResize: (() -> Void)?
     var onEdit: ((Mission) -> Void)?
     var onManage: (() -> Void)?
     var onSetup: ((HarnessInfo) -> Void)?
+    var onInspectMission: ((Mission) -> Void)?
+    var onTaste: ((Mission, Checkpoint?) -> Void)?
+    var onEvidence: ((Mission, Checkpoint) -> Void)?
+    var onJudgment: ((Mission) -> Void)?
+    var onQueue: ((QueueItem) -> Void)?
+    var onShowQueue: (() -> Void)?
     let stateURL: URL
     private var timer: Timer?
     private var closeTask: Task<Void, Never>?
+    private var recordProcess: Process?
 
     init(stateURL: URL, demo: Bool) {
         self.stateURL = stateURL; showingDemo = demo
@@ -42,6 +49,7 @@ import SwiftUI
     }
     var visibleAgents: [Agent] { providerFilter == "All sources" ? feed.agents : feed.agents.filter { $0.provider == providerFilter } }
     var missions: [Mission] {
+        if providerFilter == "All sources" { return feed.missions }
         let ids = Set(visibleAgents.map(\.missionId))
         return feed.missions.filter { ids.contains($0.id) }
     }
@@ -53,8 +61,16 @@ import SwiftUI
         }
     }
     var selectedAgent: Agent? { agents.first { $0.id == selectedAgentId } ?? agents.first { $0.needsHuman(at: now) } }
-    var attentionCount: Int { feed.agents.filter { $0.needsHuman(at: now) }.count }
-    var visibleAttentionCount: Int { visibleAgents.filter { $0.needsHuman(at: now) }.count }
+    var queue: [QueueItem] { feed.queue ?? [] }
+    var visibleQueue: [QueueItem] {
+        if providerFilter == "All sources" { return queue }
+        let ids = Set(missions.map(\.id))
+        return queue.filter { ids.contains($0.missionId) }
+    }
+    var attentionCount: Int { feed.queue == nil ? feed.agents.filter { $0.needsHuman(at: now) }.count : queue.filter(\.needsDecision).count }
+    var visibleAttentionCount: Int { feed.queue == nil ? visibleAgents.filter { $0.needsHuman(at: now) }.count : visibleQueue.filter(\.needsDecision).count }
+    var driftCount: Int { missions.filter { $0.assessment?.course == "suspectedDrift" }.count }
+    var evidenceGapCount: Int { missions.filter { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }.count }
     var disconnected: Bool { feed.isDisconnected(at: now) }
 
     func reload() {
@@ -185,20 +201,70 @@ import SwiftUI
             message = "Opened Codex · resume command also copied"
         } else { message = "Resume command copied · paste it in the session’s project terminal" }
     }
-    func saveMission(_ mission: Mission) {
+    func saveMission(_ mission: Mission, completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
         do {
-            let hash = SHA256.hash(data: Data(mission.id.utf8)).map { String(format: "%02x", $0) }.joined()
-            let folder = directory.appendingPathComponent("missions")
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try JSONEncoder().encode(mission).write(to: folder.appendingPathComponent(hash + ".json"), options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: folder.appendingPathComponent(hash + ".json").path)
-            message = "Mission saved · future peeks use this destination"
-        } catch { message = "Mission could not be saved: \(error.localizedDescription)" }
+            var definition = mission
+            definition.assessment = nil; definition.tasteNotes = nil; definition.goalRevision = nil; definition.definitionRevision = nil
+            definition.pinned = mission.pinned ?? true
+            for i in definition.checkpoints.indices {
+                definition.checkpoints[i].records = nil; definition.checkpoints[i].trackingState = nil
+            }
+            let object = try JSONSerialization.jsonObject(with: JSONEncoder().encode(definition))
+            post("definition", payload: ["missionId": mission.id, "definitionRevision": mission.definitionRevision ?? "", "definition": object], completion: completion)
+        } catch { message = "Mission could not be saved: \(error.localizedDescription)"; completion?(false) }
     }
     func verify(_ checkpoint: Checkpoint) {
-        guard var mission = mission, let i = mission.checkpoints.firstIndex(where: { $0.id == checkpoint.id }), !checkpoint.evidence.isEmpty else { return }
-        mission.checkpoints[i].status = "verified"; mission.checkpoints[i].source = "human"
-        saveMission(mission)
+        guard let mission else { return }
+        onInspectMission?(mission)
+    }
+    var currentFeedURL: URL { showingDemo ? directory.appendingPathComponent("demo-state.json") : stateURL }
+    func post(_ action: String, payload: [String: Any], completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        guard !recording, let script = Bundle.main.resourceURL?.appendingPathComponent("bridge/mission_commands.py") else { return }
+        do {
+            let data = try JSONSerialization.data(withJSONObject: payload)
+            let process = Process(), input = Pipe(), output = Pipe(), errors = Pipe()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["python3", script.path, "--state", currentFeedURL.path, "--action", action]
+            process.standardInput = input; process.standardOutput = output; process.standardError = errors
+            process.terminationHandler = { [weak self] task in
+                _ = output.fileHandleForReading.readDataToEndOfFile()
+                let failure = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "The record could not be saved"
+                let success = task.terminationStatus == 0
+                Task { @MainActor [weak self] in
+                    self?.recording = false
+                    self?.message = success ? "Recorded · the mission view will refresh" : failure
+                    completion?(success)
+                }
+            }
+            recording = true; recordProcess = process
+            try process.run()
+            try input.fileHandleForWriting.write(contentsOf: data)
+            try input.fileHandleForWriting.close()
+        } catch {
+            recording = false; message = "Could not save this record: \(error.localizedDescription)"
+            completion?(false)
+        }
+    }
+    func review(_ evidence: EvidenceRecord, mission: Mission, verdict: String) {
+        guard let fingerprint = evidence.fingerprint, let goal = mission.goalRevision else { return }
+        post("review-evidence", payload: ["missionId": mission.id, "goalRevision": goal,
+             "evidenceId": evidence.id, "fingerprint": fingerprint, "verdict": verdict])
+    }
+    func resolve(_ item: QueueItem, outcome: String) {
+        guard let id = item.recordId, let mission = feed.missions.first(where: { $0.id == item.missionId }) else { return }
+        let note = mission.tasteNotes?.first { $0.id == id }
+        let revision = item.recordGoalRevision ?? note?.goalRevision ?? mission.goalRevision ?? ""
+        post("resolve", payload: ["missionId": mission.id, "recordId": id, "recordGoalRevision": revision, "outcome": outcome])
+        if outcome == "change" { message = "Guidance recorded locally · open the source session to direct the change" }
+    }
+    func openEvidence(_ evidence: EvidenceRecord) {
+        guard !showingDemo, let reference = evidence.reference else { return }
+        if reference.hasPrefix("/") {
+            let url = URL(fileURLWithPath: reference)
+            NSWorkspace.shared.open(url)
+        } else if let url = URL(string: reference), url.scheme == "https" || (url.scheme == "file" && (url.host == nil || url.host == "" || url.host == "localhost")) {
+            NSWorkspace.shared.open(url)
+        } else { message = "This reference cannot be opened. Inspect it at the source." }
     }
     func age(_ timestamp: Double) -> String {
         guard timestamp > 0 else { return "No checkpoint" }
