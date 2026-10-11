@@ -23,7 +23,7 @@ def handle(event: dict, state: Path, kind: str):
     workspaces = event.get("workspacePaths") or []
     cwd = workspaces[0] if workspaces else ""
     a = dict(existing) if existing else agent(aid, aid, "Antigravity · " + (Path(cwd).name or sid[:8]), "Antigravity")
-    a.update(sessionId=sid, lastActivity=time.time(), artifactPath=event.get("artifactDirectoryPath"), workspacePaths=workspaces)
+    a.update(sessionId=sid, workspace=cwd, lastActivity=time.time(), artifactPath=event.get("artifactDirectoryPath"), workspacePaths=workspaces)
     transcript = event.get("transcriptPath", "")
     a["sourceApp"] = "Antigravity IDE" if "antigravity-ide" in transcript else "Antigravity CLI" if "antigravity-cli" in transcript else "Antigravity"
     mission = next((m for m in feed["missions"] if m["id"] == a["missionId"]),

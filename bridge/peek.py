@@ -9,7 +9,8 @@ import os
 from pathlib import Path
 import signal
 import time
-from common import agent, atomic_json, read_decision, request
+from common import agent, atomic_json, read_decision, request, fresh_timestamp, workspace_in_scope
+from validation import agent as valid_agent, mission as valid_mission, number
 from observer import Observer
 from harnesses import Registry, register
 
@@ -57,17 +58,35 @@ class Demo:
         return {"generatedAt": now, "demo": True, "missions": [mission], "agents": [validation, bridge, design, research], "warnings": []}
 
 
-def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=24):
+def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=24, project=None):
     warnings = []
     by_id = {a["id"]: a for a in agents}
     mission_map = {m["id"]: m for m in missions}
     for path in (directory / "sources").glob("*.json"):
         try:
             source = json.loads(path.read_text())
+            if not isinstance(source, dict) or not isinstance(source.get("missions", []), list) or not isinstance(source.get("agents", []), list):
+                raise ValueError("Expected source lists")
+            authority = source.get("managed") is True and source.get("active") is True and fresh_timestamp(source.get("generatedAt"), max_age=15)
+            connected = []
+            for raw in source.get("agents", []):
+                try:
+                    a = valid_agent(raw)
+                except ValueError:
+                    warnings.append("An invalid connected agent was skipped")
+                    continue
+                if workspace_in_scope(a.get("workspace"), project):
+                    connected.append(a)
+            connected_missions = {a["missionId"] for a in connected}
             for m in source.get("missions", []):
-                if m["id"] not in mission_map or source.get("managed", False):
+                try:
+                    m = valid_mission(m)
+                except ValueError:
+                    warnings.append("An invalid connected mission was skipped")
+                    continue
+                if m["id"] in connected_missions and (m["id"] not in mission_map or authority):
                     mission_map[m["id"]] = m
-            for a in source.get("agents", []):
+            for a in connected:
                 hid = a.get("harnessId") or a["id"].split(":")[0]
                 a["harnessId"] = hid
                 if harnesses and any(h["id"] == hid and not h["enabled"] for h in harnesses):
@@ -75,18 +94,20 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                 if time.time() - a["lastActivity"] > recent_hours * 3600:
                     continue
                 if a.get("request") and a["request"].get("mode") == "decision":
-                    if time.time() > a["request"]["expiresAt"] or time.time() - source["generatedAt"] > 15:
+                    if time.time() > a["request"]["expiresAt"] or not fresh_timestamp(source.get("generatedAt"), max_age=15):
                         a.update(request=None, status="attention", summary="Approval connection expired. Return to the source session.")
                 observed = by_id.get(a["id"])
-                if observed is None or a.get("request") or source.get("managed", False) or a["lastActivity"] >= observed["lastActivity"]:
+                if observed is None or a.get("request") or authority or a["lastActivity"] >= observed["lastActivity"]:
                     by_id[a["id"]] = a
         except (OSError, ValueError, KeyError, TypeError):
             warnings.append("One connected source could not be read")
     for path in (directory / "progress").glob("*.json"):
         try:
             progress = json.loads(path.read_text())
+            if not isinstance(progress, dict) or not number(progress.get("at")) or not all(isinstance(progress.get(k), str) for k in ("agentId", "evidence", "trajectory", "nextStep")):
+                raise ValueError("Invalid progress")
             a = by_id.get(progress["agentId"])
-            if a:
+            if a and progress["at"] >= a.get("lastProgress", 0):
                 a.update(evidence=progress["evidence"], lastProgress=progress["at"],
                          trajectory=progress["trajectory"], nextStep=progress["nextStep"])
         except (OSError, ValueError, KeyError, TypeError):
@@ -94,7 +115,7 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
     for mid in list(mission_map):
         path = directory / "missions" / mission_filename(mid)
         try:
-            override = json.loads(path.read_text())
+            override = valid_mission(json.loads(path.read_text()))
             if override["id"] == mid:
                 mission_map[mid] = override
         except FileNotFoundError:
@@ -112,6 +133,7 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
         if h.get("omittedLogs", 0):
             warnings.append(f"{h['name']}: {h['omittedLogs']} recent logs omitted; monitoring coverage is incomplete")
     return {"generatedAt": time.time(), "demo": False, "harnesses": catalog,
+            "projectRoot": str(Path(project).resolve()) if project else None,
             "missions": [m for mid, m in mission_map.items() if mid in active_missions],
             "agents": sorted(by_id.values(), key=lambda a: (a["status"] != "attention", -a["lastActivity"])),
             "warnings": warnings}
@@ -133,7 +155,7 @@ def watch(args):
         if getattr(args, "owner_pid", 0) and os.getppid() != args.owner_pid:
             break
         missions, agents = observer.refresh()
-        feed = merge_feed(missions, agents, directory, observer.catalog, observer.registry.recent_hours)
+        feed = merge_feed(missions, agents, directory, observer.catalog, observer.registry.recent_hours, observer.project)
         feed["warnings"].extend(observer.registry.warnings)
         atomic_json(path, feed)
         atomic_json(directory / "demo-state.json", demo.feed(directory))
@@ -175,9 +197,6 @@ def checkpoint(args):
     if a is None:
         raise SystemExit("Agent not found. Use its id from the live state file.")
     filename = hashlib.sha256(a["id"].encode()).hexdigest() + ".json"
-    atomic_json(directory / "progress" / filename,
-                {"agentId": a["id"], "at": time.time(), "evidence": args.evidence,
-                 "trajectory": args.trajectory, "nextStep": args.next})
     if args.checkpoint:
         mission = next(m for m in feed["missions"] if m["id"] == a["missionId"])
         folder = directory / "missions"
@@ -190,12 +209,17 @@ def checkpoint(args):
             if path.exists():
                 saved = json.loads(path.read_text())
                 if saved.get("id") == mission["id"]:
+                    if saved.get("definitionRevision", 0) != mission.get("definitionRevision", 0) or saved.get("goal") != mission.get("goal"):
+                        raise SystemExit("Mission changed. Refresh before reporting this landing check.")
                     mission = saved
             check = next((c for c in mission["checkpoints"] if c["id"] == args.checkpoint), None)
             if check is None:
                 raise SystemExit("Landing check not found. Use a checkpoint id from the state file.")
             check.update(status="reported", evidence=args.evidence, source="agent")
             atomic_json(path, mission)
+    atomic_json(directory / "progress" / filename,
+                {"agentId": a["id"], "at": time.time(), "evidence": args.evidence,
+                 "trajectory": args.trajectory, "nextStep": args.next})
 
 
 def main():

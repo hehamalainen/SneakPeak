@@ -1,11 +1,44 @@
 """Local, dependency-free transport shared by observers and approval adapters."""
 from __future__ import annotations
 import json
+import math
 import os
 from pathlib import Path
 import tempfile
 import time
 import uuid
+
+
+def fresh_timestamp(value, *, max_age: float = 10) -> bool:
+    try:
+        return (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and math.isfinite(value) and -5 <= time.time() - value <= max_age)
+    except OverflowError:
+        return False
+
+
+def workspace_in_scope(workspace, project) -> bool:
+    if not project:
+        return True
+    return (isinstance(workspace, str) and bool(workspace)
+            and Path(workspace).resolve().is_relative_to(Path(project).resolve()))
+
+
+def approval_surface_available(state: Path, provider: str, workspace: str) -> bool:
+    """Collector liveness alone never authorizes an inline approval workflow."""
+    try:
+        feed = json.loads(state.read_text())
+        surface = json.loads((state.parent / "approval-surface.json").read_text())
+        return (isinstance(feed, dict) and isinstance(surface, dict)
+                and fresh_timestamp(feed.get("generatedAt"))
+                and feed.get("demo", False) is False
+                and fresh_timestamp(surface.get("generatedAt"))
+                and surface.get("live") is True
+                and surface.get("statePath") == str(state.resolve())
+                and surface.get("provider") in {"All sources", provider}
+                and workspace_in_scope(workspace, feed.get("projectRoot")))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return False
 
 
 def atomic_json(path: Path, value: dict) -> None:

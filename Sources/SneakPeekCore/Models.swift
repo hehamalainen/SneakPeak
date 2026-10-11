@@ -16,6 +16,7 @@ public struct Mission: Codable, Identifiable, Sendable {
     public var title: String
     public var goal: String
     public var checkpoints: [Checkpoint]
+    public var definitionRevision: Int?
 }
 
 public struct Checkpoint: Codable, Identifiable, Sendable {

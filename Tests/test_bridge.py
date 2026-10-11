@@ -30,6 +30,8 @@ class BridgeTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.directory = Path(self.temporary.name)
         self.state = self.directory / "state.json"
+        atomic_json(self.directory / "approval-surface.json", {"generatedAt": time.time(), "live": True,
+                    "statePath": str(self.state.resolve()), "provider": "All sources"})
 
     def tearDown(self):
         self.temporary.cleanup()
@@ -142,7 +144,7 @@ class BridgeTests(unittest.TestCase):
     def test_progress_overlay_preserves_fresh_observed_activity(self):
         demo = Demo().feed(self.directory)
         a = demo["agents"][1]
-        atomic_json(self.directory / "progress" / "check.json", {"agentId": a["id"], "evidence": "Test suite passed", "at": 123, "trajectory": "onCourse", "nextStep": "Review the flow"})
+        atomic_json(self.directory / "progress" / "check.json", {"agentId": a["id"], "evidence": "Test suite passed", "at": time.time() + 1, "trajectory": "onCourse", "nextStep": "Review the flow"})
         result = merge_feed(demo["missions"], [a], self.directory)
         observed = result["agents"][0]
         self.assertEqual(observed["status"], "working")

@@ -13,6 +13,7 @@ import SwiftUI
     @Published var selectedAgentId: String?
     @Published var message: String?
     @Published var sentRequests = Set<String>()
+    private var sentByMode: [Bool: Set<String>] = [:]
     @Published var providerFilter = "All sources"
     @Published var now = Date().timeIntervalSince1970
     var onResize: (() -> Void)?
@@ -20,10 +21,12 @@ import SwiftUI
     var onManage: (() -> Void)?
     var onSetup: ((HarnessInfo) -> Void)?
     let stateURL: URL
+    private let ownsApprovalSurface: Bool
     private var timer: Timer?
     private var closeTask: Task<Void, Never>?
 
-    init(stateURL: URL, demo: Bool) {
+    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true) {
+        self.ownsApprovalSurface = ownsApprovalSurface
         self.stateURL = stateURL; showingDemo = demo
         reload()
         timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
@@ -65,8 +68,9 @@ import SwiftUI
             feed = newFeed
             if message == "Connecting to local sessions…" { message = nil }
             let pendingIDs = Set(newFeed.agents.compactMap { $0.request?.id })
-            if !sentRequests.isEmpty && sentRequests.isDisjoint(with: pendingIDs) {
-                sentRequests.removeAll()
+            if !sentRequests.subtracting(pendingIDs).isEmpty {
+                sentRequests.formIntersection(pendingIDs)
+                sentByMode[showingDemo] = sentRequests
                 message = showingDemo ? "The example agent received your decision." : "Request cleared by the source · check the latest agent status"
             }
             if !newFeed.missions.contains(where: { $0.id == selectedMissionId }) { selectedMissionId = newFeed.missions.first?.id }
@@ -74,6 +78,20 @@ import SwiftUI
         } catch {
             if feed.generatedAt == 0 { message = "Connecting to local sessions…" }
             else { message = "The local feed could not be read. Check the bridge." }
+            publishApprovalSurface(live: false)
+            return
+        }
+        publishApprovalSurface()
+    }
+    func publishApprovalSurface(live: Bool? = nil) {
+        guard ownsApprovalSurface else { return }
+        let value: [String: Any] = ["generatedAt": Date().timeIntervalSince1970,
+                                   "live": live ?? (!showingDemo && !feed.demo && !disconnected && feed.generatedAt > 0),
+                                   "statePath": stateURL.standardizedFileURL.resolvingSymlinksInPath().path,
+                                   "provider": providerFilter]
+        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: value) {
+            try? data.write(to: directory.appendingPathComponent("approval-surface.json"), options: .atomic)
         }
     }
     func setExpanded(_ value: Bool) {
@@ -94,11 +112,15 @@ import SwiftUI
         }
     }
     func toggleMode() {
+        publishApprovalSurface(live: false)
+        sentByMode[showingDemo] = sentRequests
         showingDemo.toggle(); selectedMissionId = nil; selectedAgentId = nil; message = nil
+        sentRequests = sentByMode[showingDemo] ?? []
         feed = .empty; reload()
     }
     func filterProvider(_ provider: String) {
         providerFilter = provider
+        publishApprovalSurface()
         selectedMissionId = missions.first?.id; selectedAgentId = nil
     }
     func manageHarnesses() { storeFocus(); onManage?() }
@@ -156,6 +178,7 @@ import SwiftUI
             try DecisionWriter.write(agent: agent, choice: choice.id,
                                      directory: directory.appendingPathComponent("decisions"), now: now)
             sentRequests.insert(request.id)
+            sentByMode[showingDemo] = sentRequests
             message = "Decision sent · waiting for the agent to confirm"
         } catch { message = "This request is no longer available. Open the source session." }
     }
@@ -185,20 +208,22 @@ import SwiftUI
             message = "Opened Codex · resume command also copied"
         } else { message = "Resume command copied · paste it in the session’s project terminal" }
     }
-    func saveMission(_ mission: Mission) {
+    @discardableResult func saveMission(_ mission: Mission, base: Mission? = nil) -> Bool {
         do {
-            let hash = SHA256.hash(data: Data(mission.id.utf8)).map { String(format: "%02x", $0) }.joined()
-            let folder = directory.appendingPathComponent("missions")
-            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            try JSONEncoder().encode(mission).write(to: folder.appendingPathComponent(hash + ".json"), options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: folder.appendingPathComponent(hash + ".json").path)
+            guard let original = base ?? feed.missions.first(where: { $0.id == mission.id }) else { throw MissionSaveError.conflict }
+            try MissionPersistence.save(mission, base: original, directory: directory.appendingPathComponent("missions"))
             message = "Mission saved · future peeks use this destination"
-        } catch { message = "Mission could not be saved: \(error.localizedDescription)" }
+            return true
+        } catch MissionSaveError.conflict { message = "Mission changed while editing. Reopen it and apply your changes." }
+        catch { message = "Mission could not be saved: \(error.localizedDescription)" }
+        return false
     }
     func verify(_ checkpoint: Checkpoint) {
-        guard var mission = mission, let i = mission.checkpoints.firstIndex(where: { $0.id == checkpoint.id }), !checkpoint.evidence.isEmpty else { return }
-        mission.checkpoints[i].status = "verified"; mission.checkpoints[i].source = "human"
-        saveMission(mission)
+        guard let mission = mission else { return }
+        do {
+            try MissionPersistence.verify(checkpoint, base: mission, directory: directory.appendingPathComponent("missions"))
+            message = "Evidence verified"
+        } catch { message = "Evidence changed. Refresh and review the latest report before verifying." }
     }
     func age(_ timestamp: Double) -> String {
         guard timestamp > 0 else { return "No checkpoint" }
