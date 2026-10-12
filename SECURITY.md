@@ -29,11 +29,20 @@ its expiry, and within clock-skew tolerance. A legacy request without an issue
 time is not eligible for a file-based reply. This timing check is not identity
 authentication.
 
-Accepted checks and Taste judgments carry an unsigned marker in the main status
-and inspector. An authenticated broker, protected installation, trusted request
-producers and verified projections remain required before treating these as
-secure human acceptance. The existing command writer still cannot prove that
-its caller is human.
+Native check acceptance is recomputed and unsigned reviews/Taste are displayed as
+claims, with zero authenticated acceptance. Production human signing is currently
+unavailable. A distinct simulation app exercises native P-256 receipts with a
+session-only software key and explicit mock biometry; all its acceptance labels
+and counts say SIMULATION. It does not access Keychain, Secure Enclave or real
+biometry, and its buttons are not evidence of human presence. The native app does
+not fall back to the unsigned command writer for review, Taste or resolution.
+The command writer remains an unsigned research transport.
+
+See [the signing experiment and production release checklist](docs/human-action-simulation.md).
+Real signing needs validated code identity, provisioned Keychain isolation,
+explicit enrollment and hardware policy tests. No production signing or durable
+trust storage is implemented in this branch. Source truth, completeness and
+durable rollback resistance remain outside this simulation.
 
 ## Decisions and adapters
 

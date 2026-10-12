@@ -23,7 +23,7 @@ task_binary_dir="$(CLANG_MODULE_CACHE_PATH="$task_scratch/cache" swift build -c 
 mkdir -p "$task_app/Contents/MacOS" "$task_app/Contents/Resources/bridge"
 cp "$task_binary_dir/SneakPeek" "$task_app/Contents/MacOS/SneakPeek"
 cp -R "$task_binary_dir/SneakPeek_SneakPeek.bundle" "$task_app/Contents/Resources/"
-if [[ "$task_bundle_id" != "local.sneakpeek.cove.demo" && "$task_bundle_id" != "local.sneakpeek.cove.gestures" ]]; then
+if [[ "$task_bundle_id" != "local.sneakpeek.cove.demo" && "$task_bundle_id" != "local.sneakpeek.cove.gestures" && "$task_bundle_id" != "local.sneakpeek.human-actions.simulation" ]]; then
   cp bridge/*.py "$task_app/Contents/Resources/bridge/"
 fi
 cat > "$task_app/Contents/Info.plist" <<'PLIST'
@@ -44,6 +44,10 @@ cat > "$task_app/Contents/Info.plist" <<'PLIST'
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $task_bundle_id" "$task_app/Contents/Info.plist"
 case "$task_bundle_id" in
+  local.sneakpeek.human-actions.simulation)
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Human Action Simulation" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Human Action Simulation" "$task_app/Contents/Info.plist"
+    ;;
   local.sneakpeek.cove.demo)
     /usr/libexec/PlistBuddy -c "Set :CFBundleName Cove Demo" "$task_app/Contents/Info.plist"
     /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Cove Demo" "$task_app/Contents/Info.plist"

@@ -55,6 +55,11 @@ import SwiftUI
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
         NSApp.appearance = NSAppearance(named: .darkAqua)
+        if Bundle.main.bundleIdentifier == HumanActionSimulation.bundleIdentifier {
+            do { try launchHumanActionSimulation() }
+            catch { let alert = NSAlert(error: error); alert.runModal(); NSApp.terminate(nil) }
+            return
+        }
         let args = CommandLine.arguments
         func argument(_ key: String) -> String? {
             guard let index = args.firstIndex(of: key), index + 1 < args.count else { return nil }
@@ -164,6 +169,28 @@ import SwiftUI
         }
         NotificationCenter.default.addObserver(self, selector: #selector(displayChanged), name: NSApplication.didChangeScreenParametersNotification, object: nil)
         DistributedNotificationCenter.default().addObserver(self, selector: #selector(showPeek), name: showNotification, object: nil)
+    }
+
+    private func launchHumanActionSimulation() throws {
+        // Distinct bundle, fresh state, no observer, approval surface, external path override,
+        // shared notifications, host setup, or live/demo switch.
+        NSApp.setActivationPolicy(.regular)
+        let state = try HumanActionSimulationFixture.create()
+        store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false,
+                          humanActionSimulation: HumanActionSimulation())
+        store.onTaste = { [weak self] mission, checkpoint in self?.taste(mission, checkpoint: checkpoint) }
+        store.onQueue = { [weak self] item in self?.inspectQueue(item) }
+        store.onShowQueue = { [weak self] in self?.queueManager() }
+        let pane = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 590, height: 730),
+                            styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
+        pane.title = "SneakPeek · HUMAN ACTION SIMULATION · no real authentication"
+        pane.isReleasedWhenClosed = false
+        pane.contentView = NSHostingView(rootView: MissionInspector(store: store, missionId: "simulation-mission"))
+        playgroundWindow = pane
+        let menu = NSMenu(), app = NSMenuItem(), actions = NSMenu()
+        let quit = actions.addItem(withTitle: "Quit Human Action Simulation", action: #selector(quit), keyEquivalent: "q")
+        quit.target = self; app.submenu = actions; menu.addItem(app); NSApp.mainMenu = menu
+        show(pane)
     }
 
     private func startBridge(stateURL: URL, project: String?) {

@@ -27,6 +27,8 @@ public struct Mission: Codable, Identifiable, Sendable {
     public var goalOrigin: String?
     public var assessment: MissionAssessment?
     public var tasteNotes: [TasteSignal]?
+    public var humanAuthentication: String?
+    public var hasUnsignedHumanClaims: Bool?
 }
 
 public struct Checkpoint: Codable, Identifiable, Sendable {
@@ -40,6 +42,7 @@ public struct Checkpoint: Codable, Identifiable, Sendable {
     public var trackingState: String?
     public var records: [EvidenceRecord]?
     public var maxAgeSeconds: Double?
+    public var authentication: String?
     public var verified: Bool { status == "verified" }
     public init(id: String, label: String, status: String, evidence: String, source: String, kind: String? = nil, required: Bool? = nil) {
         self.id = id; self.label = label; self.status = status; self.evidence = evidence; self.source = source
