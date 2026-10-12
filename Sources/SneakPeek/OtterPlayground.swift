@@ -7,6 +7,14 @@ enum OtterDemoScene: String, CaseIterable, Identifiable {
     case unseen = "Can’t see", quiet = "Quiet agent", raft = "Holding paws"
     case drift = "Drift", rejoin = "Rejoin"
     var id: String { rawValue }
+    var indicatorColor: Color {
+        switch self {
+        case .attention, .drift: Color(red: 0.94, green: 0.73, blue: 0.43)
+        case .resting, .raft, .rejoin: Color(red: 0.76, green: 0.88, blue: 0.79)
+        case .unseen, .quiet: Color(red: 0.56, green: 0.58, blue: 0.60)
+        case .working: Color(red: 0.52, green: 0.68, blue: 0.94)
+        }
+    }
     var explanation: String {
         switch self {
         case .working: "Work starts: peek into view, then stay still."
@@ -213,7 +221,7 @@ struct OtterPlayground: View {
             CoveDemoCharacter(model: model)
                 .frame(width: 260, height: 196)
                 .padding(18)
-            Circle().fill(model.store.otterStatus.color).frame(width: 9, height: 9).padding(20)
+            Circle().fill(model.scene.indicatorColor).frame(width: 9, height: 9).padding(20)
         }
         .background(Color.white.opacity(0.035), in: RoundedRectangle(cornerRadius: 20))
     }
@@ -299,7 +307,7 @@ struct FloatingOtterPreview: View {
         ZStack(alignment: .topTrailing) {
             CoveDemoCharacter(model: model)
                 .frame(width: 240, height: 180)
-            Circle().fill(model.store.otterStatus.color).frame(width: 7, height: 7).padding(8)
+            Circle().fill(model.scene.indicatorColor).frame(width: 7, height: 7).padding(8)
         }
         .padding(12).contentShape(Rectangle())
         .gesture(
@@ -322,10 +330,10 @@ struct FloatingOtterPreview: View {
         )
         .focusable()
         .onKeyPress(keys: [.return, .space]) { _ in open(); return .handled }
-        .help("Example · \(model.store.otterStatus.title). Drag to move. Click or press Space to open the raft and controls.")
+        .help("Example · \(model.scene.rawValue). Drag to move. Click or press Space to open the raft and controls.")
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Example otter. \(model.store.otterStatus.title)")
+        .accessibilityLabel("Example Cove. \(model.scene.rawValue)")
         .accessibilityHint("Opens the preview’s raft and gesture controls")
         .accessibilityAction { open() }
     }
