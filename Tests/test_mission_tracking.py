@@ -341,6 +341,70 @@ class MissionTrackingTests(unittest.TestCase):
         self.assertTrue(all(item["kind"] == "evidence" for item in result["queue"]))
         self.assertTrue(all(m["assessment"]["decisionCount"] == 0 for m in result["missions"]))
 
+    def test_missing_file_url_cannot_be_accepted(self):
+        artifact = self.directory / 'absent report.txt'
+        record = self.evidence(reference=artifact.as_uri())
+        with self.assertRaises(ValueError):
+            self.accept(record)
+        result = self.project()
+        self.assertEqual(result['missions'][0]['assessment']['verifiedCount'], 0)
+        self.assertEqual(result['missions'][0]['checkpoints'][0]['records'][0]['state'], 'missingArtifact')
+
+    def test_percent_encoded_file_url_has_the_same_snapshot_as_a_local_path(self):
+        artifact = self.directory / 'result #1 café.txt'; artifact.write_text('PASS')
+        record = self.evidence(reference=artifact.as_uri())
+        self.assertEqual(record['reference'], str(artifact))
+        self.assertIsNotNone(record['digest'])
+        self.assertEqual(record['localFile']['size'], artifact.stat().st_size)
+        self.accept(record)
+        self.assertEqual(self.project()['missions'][0]['assessment']['verifiedCount'], 1)
+        artifact.write_text('FAIL with changed content')
+        self.assertEqual(self.project()['missions'][0]['checkpoints'][0]['records'][0]['state'], 'artifactChanged')
+
+    def test_existing_file_url_records_still_check_missing_or_changed_artifacts(self):
+        artifact = self.directory / 'legacy result.txt'; artifact.write_text('PASS')
+        record = self.evidence(reference=str(artifact))
+        record['reference'] = artifact.as_uri()  # Older stored records are not rewritten.
+        save_record(self.directory, 'evidence', record)
+        self.accept(record)
+        self.assertEqual(self.project()['missions'][0]['assessment']['verifiedCount'], 1)
+        artifact.unlink()
+        result = self.project()
+        self.assertEqual(result['missions'][0]['assessment']['verifiedCount'], 0)
+        self.assertEqual(result['missions'][0]['checkpoints'][0]['records'][0]['state'], 'missingArtifact')
+
+    def test_file_url_digest_is_checked_at_review_even_if_metadata_is_preserved(self):
+        import os
+        artifact = self.directory / 'bound result.txt'; artifact.write_text('PASS')
+        before = artifact.stat()
+        record = self.evidence(reference=str(artifact))
+        record['reference'] = 'file://localhost' + artifact.as_uri()[len('file://'):]
+        save_record(self.directory, 'evidence', record)
+        artifact.write_text('FAIL')  # Same size and timestamp defeats a metadata-only check.
+        os.utime(artifact, ns=(before.st_atime_ns, before.st_mtime_ns))
+        with self.assertRaisesRegex(ValueError, 'content changed'):
+            self.accept(record)
+        self.assertEqual(self.project()['missions'][0]['assessment']['verifiedCount'], 0)
+
+    def test_legacy_file_url_without_a_snapshot_requires_new_evidence(self):
+        artifact = self.directory / 'old result.txt'; artifact.write_text('PASS')
+        record = self.evidence(reference=str(artifact))
+        record.update(reference=artifact.as_uri(), digest=None)
+        record.pop('localFile')
+        save_record(self.directory, 'evidence', record)
+        with self.assertRaises(ValueError):
+            self.accept(record)
+        self.assertEqual(self.project()['missions'][0]['checkpoints'][0]['records'][0]['state'], 'missingReference')
+
+    def test_remote_and_malformed_file_urls_are_not_reviewable(self):
+        for reference in ['file://remote-host/tmp/report.txt', 'file:///tmp/report?query',
+                          'file:///tmp/report#fragment', 'file:///tmp/report%00.txt', 'file:///tmp/report%FF.txt']:
+            with self.subTest(reference=reference):
+                record = self.evidence(reference=reference)
+                with self.assertRaises(ValueError):
+                    self.accept(record)
+        self.assertEqual(self.project()['missions'][0]['assessment']['verifiedCount'], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

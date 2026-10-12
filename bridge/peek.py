@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import signal
 import time
+import uuid
 from common import default_state_path, agent, atomic_json, read_decision, request, fresh_timestamp, workspace_in_scope
 from validation import agent as valid_agent, mission as valid_mission, number
 from observer import Observer
@@ -242,7 +243,9 @@ def checkpoint(args):
         raise SystemExit("Agent not found. Use its id from the live state file.")
     filename = hashlib.sha256(a["id"].encode()).hexdigest() + ".json"
     if args.checkpoint:
-        mission = next(m for m in feed["missions"] if m["id"] == a["missionId"])
+        mission = next((m for m in feed["missions"] if m["id"] == a["missionId"]), None)
+        if mission is None:
+            raise SystemExit("Mission not found. Refresh the session before reporting a landing check.")
         folder = directory / "missions"
         folder.mkdir(parents=True, exist_ok=True)
         path = folder / mission_filename(mission["id"])
@@ -290,7 +293,7 @@ def decorate_demo(feed, started):
     for i, check in enumerate(mission["checkpoints"]):
         if i == 2:
             continue  # One missing check makes uncertainty visible.
-        record = {"id": str(__import__("uuid").UUID(int=100 + i)), "missionId": mission["id"],
+        record = {"id": str(uuid.UUID(int=100 + i)), "missionId": mission["id"],
                   "checkpointId": check["id"], "goalRevision": rev, "summary": check["evidence"],
                   "reference": "demo://check/" + check["id"], "verdict": "supports", "source": "report",
                   "actor": "Example agent", "observedAt": started, "digest": None}
@@ -298,7 +301,7 @@ def decorate_demo(feed, started):
             record["exampleReview"] = {"evidenceId": record["id"], "goalRevision": rev,
                                       "fingerprint": fingerprint(record), "verdict": "accept", "createdAt": started}
         check["exampleEvidence"] = [record]
-    mission["exampleTaste"] = [{"id": str(__import__("uuid").UUID(int=200)), "missionId": mission["id"],
+    mission["exampleTaste"] = [{"id": str(uuid.UUID(int=200)), "missionId": mission["id"],
                                "goalRevision": rev, "valence": "off", "strength": "hunch",
                                "note": "The flow works, but it feels a little too demanding. I want it to feel calmer.",
                                "impact": "review", "acceptance": "unassessed", "createdAt": started,

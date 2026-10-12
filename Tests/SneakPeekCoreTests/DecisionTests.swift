@@ -3,7 +3,7 @@ import Testing
 @testable import SneakPeekCore
 
 private func waitingAgent(requestID: String = UUID().uuidString, expiry: Double = 200) throws -> Agent {
-    let json: [String: Any] = ["id": "agent-a", "missionId": "mission-a", "name": "Validator", "provider": "Codex", "status": "attention", "summary": "Waiting", "lastActivity": 100, "lastProgress": 0, "evidence": "No checkpoint", "nextStep": "Review command", "trajectory": "unknown", "request": ["id": requestID, "title": "Allow?", "detail": "Exact command", "choices": [["id": "accept", "label": "Allow once"]], "mode": "decision", "expiresAt": expiry]]
+    let json: [String: Any] = ["id": "agent-a", "missionId": "mission-a", "name": "Validator", "provider": "Codex", "status": "attention", "summary": "Waiting", "lastActivity": 100, "lastProgress": 0, "evidence": "No checkpoint", "nextStep": "Review command", "trajectory": "unknown", "request": ["id": requestID, "title": "Allow?", "detail": "Exact command", "choices": [["id": "accept", "label": "Allow once"]], "mode": "decision", "issuedAt": 10, "expiresAt": expiry]]
     return try JSONDecoder().decode(Agent.self, from: JSONSerialization.data(withJSONObject: json))
 }
 
@@ -37,4 +37,42 @@ private func waitingAgent(requestID: String = UUID().uuidString, expiry: Double 
     #expect(!agent.needsHuman(at: 1000))
     agent.trajectory = "atRisk"
     #expect(agent.needsHuman(at: 1000))
+}
+
+@Test func aLegacyRequestCannotOfferOrWriteANativeReply() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var agent = try waitingAgent()
+    agent.request?.issuedAt = nil
+    #expect(!agent.request!.canAnswer(at: 101))
+    #expect(throws: DecisionError.invalidRequest) {
+        try DecisionWriter.write(agent: agent, choice: "accept", directory: directory, now: 101)
+    }
+    #expect(!FileManager.default.fileExists(atPath: directory.path))
+}
+
+@Test func nativeTimingRejectsMalformedAndNonCurrentRequests() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    for issue in [Double.nan, Double.infinity, -1, 200] {
+        var agent = try waitingAgent(); agent.request?.issuedAt = issue
+        #expect(!agent.request!.canAnswer(at: 101))
+        #expect(throws: DecisionError.invalidRequest) {
+            try DecisionWriter.write(agent: agent, choice: "accept", directory: directory, now: 101)
+        }
+    }
+    var future = try waitingAgent(); future.request?.issuedAt = 150
+    #expect(!future.request!.canAnswer(at: 101))
+    #expect(throws: DecisionError.expired) {
+        try DecisionWriter.write(agent: future, choice: "accept", directory: directory, now: 101)
+    }
+    var indefinite = try waitingAgent(); indefinite.request?.expiresAt = .infinity
+    #expect(!indefinite.request!.canAnswer(at: 101))
+    #expect(throws: DecisionError.invalidRequest) {
+        try DecisionWriter.write(agent: indefinite, choice: "accept", directory: directory, now: 101)
+    }
+    #expect(!FileManager.default.fileExists(atPath: directory.path))
+    let valid = try waitingAgent()
+    #expect(valid.request!.canAnswer(at: 101))
+    #expect(!valid.request!.canAnswer(at: 200))
 }

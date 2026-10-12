@@ -36,3 +36,78 @@ Requires macOS 14+. Packaging requires the Swift toolchain and Pillow for
 optional capture inspection; the finished app needs no Python or repository.
 The app is locally signed, not notarized. Intel is compiled but runtime/UI
 checks were performed on Apple silicon.
+
+NATIVE APPEARANCE AND LEGACY PREVIEW BUILDS
+
+Choose **Appearance → Otter** from the menu bar for a quietly mischievous companion. A simple 32-point otter peeks while agents work, briefly waves a paw for a new decision, and rests only when a fresh feed explicitly confirms an empty queue. A disconnected observer, quiet agent, or unconfirmed queue gets a separate withdrawn “can’t see” state. Click it to open the same mission panel. Course concerns and missing evidence keep their own text; a resting otter does not establish that a mission is verified. Native appearance is the default. The choice is saved locally and can also be changed from the panel footer. Gestures play once on a state or attention change, with no repeating idle animation, and respect Reduce Motion.
+
+In Otter mode, **Raft** adds a visual team view above the agent details. Paws link only between adjacent agents with fresh “on course” reports. Reported risk opens a gap; stale reports, quiet agents, and disconnection show unknown course. These are agent claims, not verified alignment. The same evidence and decision controls remain available.
+
+`./scripts/run.sh --otter` selects Otter; `--native` switches back. For a synthetic screenshot, pass `--render-preview /absolute/path.png --render-collapsed --otter --no-bridge --state /absolute/path/to/synthetic-state.json` directly to the built executable. Previews do not save appearance preferences or publish an approval surface.
+
+To build and inspect Otter separately while the normal app and other jobs keep running:
+
+```sh
+./scripts/build.sh --scratch-path "$PWD/runtime/otter-build" \
+  --app "$PWD/runtime/otter-preview/SneakPeek.app" \
+  --bundle-id local.sneakpeek.otter.preview
+./scripts/test.sh --scratch-path "$PWD/runtime/otter-tests"
+python3 scripts/preview-otter.py
+```
+
+That preview bundle has its own identity, synthetic state, and show notification. It never starts an observer or publishes an approval surface, including when opened later. The preview script renders all four silhouettes, quiet-agent behavior, the Raft, Native appearance, and a short GIF of the paw gesture under `runtime/otter-preview/`. The GIF loops for inspection; the in-app gesture plays once. Generated artwork prompts are recorded in [otter-artwork.json](docs/otter-artwork.json).
+
+Opening the separate preview app launches an interactive playground. **Play demo** runs through working, a decision, clear queue, lost visibility, quiet agent, drift, and rejoining. Individual buttons replay each event; **Holding paws**, **Drift**, and **Rejoin** let you inspect the Raft. **Otter only** hides the playground and shows a small draggable companion in a screen corner. Click it to restore the Raft and controls. These gestures run from synthetic in-memory events, with no observer or live state writes. `--play-all` starts the sequence on launch; `--render-playground` can capture the playground using the existing preview renderer.
+
+The selected character is **Sculptural Cove**. The preview uses its actual transparent artwork and a separately articulated forearm for the attention gesture. The Raft separates the two authored halves at their paw seam, and wakes or withdraws them when the queue needs attention, course is at risk, coverage is incomplete, or visibility is unavailable. Sleeping requires a fresh feed, an explicitly clear queue, and two fresh on-course reports; it does not verify a mission. The interactive isolated preview ignores external state overrides and saves no appearance preference. `--render-cove-only` and `--render-cove-raft`, with `--render-scene 'Paw up'` or another button label, capture the character and Raft using synthetic data only.
+
+## Cove presentation demo
+
+The portable presentation app is `output/cove-demo/Cove Demo.app`, with a complete handoff archive at `output/cove-demo.zip`. It has a separate `local.sneakpeek.cove.demo` identity and notification, supports macOS 14+ on Apple silicon and Intel, and bundles its artwork. It needs no repository, Python, Swift installation, account, live state, or observer to run. The build is signed for local development, not notarized distribution.
+
+Open the app and press **Play demo** or **Space** for the 32-second story. **Stop demo** or any scene button stops the timed sequence. **Acknowledge example** clears only a synthetic request. **Otter only** switches to the draggable companion; clicking Cove restores the controls. **Command-Q** quits only the demo. The package includes a short presenter guide and six gesture GIFs as backup. The normal app and agent jobs remain independent.
+
+`scripts/package-cove-demo.sh` builds this release from the frozen `runtime/cove-demo-source` snapshot, avoiding races with native-app work. It builds both CPU architectures, combines them, verifies the signature, and packages the app, guide, review, and recordings.
+
+
+## Clearer Cove gestures
+
+The revised standalone demo uses **the same Sculptural Cove character** with
+stronger visual state changes:
+
+- **Needs you:** the paw rises high, waves twice, and stays up until acknowledged.
+- **Watching:** an upright, open-eyed bust that stays still after entering.
+- **Resting:** a horizontal, closed-eye pose after a fresh, explicitly clear queue.
+- **Can't see:** a turned back and crossed-eye mark, distinct from resting.
+- **Holding paws:** the pair is visible in the main scene and floating companion;
+  it joins at the central paws, releases and drifts apart, then reconnects.
+
+The playground includes actual 32-point and 64-point previews. Start **Play demo**
+and choose **Otter only** to watch the full sequence in the floating companion.
+Click the companion to return. Each movement plays once; Reduce Motion uses
+settled poses.
+
+Build a separate presentation package without replacing the native app:
+
+```sh
+./scripts/package-cove-gestures.sh
+```
+
+This snapshots source under `runtime/cove-gestures-source`, uses its own build
+folders and the `local.sneakpeek.cove.gestures` identity, and writes
+`output/cove-gestures/Cove Gestures.app`, six real-renderer GIFs, and
+`output/cove-gestures.zip`. The new identity also has separate notifications,
+ignores live-state overrides in interactive use, and cannot start an observer,
+publish approvals, save decisions, or persist appearance preferences. The native
+app and earlier demos can remain running.
+
+The app targets macOS 14+ on Apple silicon and Intel. It is locally signed,
+not notarized. Runtime/UI testing is on Apple silicon; Intel is compiled.
+See [demo instructions](docs/cove-gestures-guide.txt) and
+[artwork prompts](docs/cove-gesture-prompts.json). Build products, captures,
+private resume checkpoints and design scratch are excluded from Git.
+
+Native auxiliary windows now reuse and focus existing inspectors, preserve
+unsaved editor drafts per target, and hide the notch while a tool window is in
+front. Reopening the notch keeps it below the tool windows. Escape reaches the
+focused editor rather than being consumed by the notch.

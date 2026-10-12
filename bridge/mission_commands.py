@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 from common import atomic_json
+from evidence_reference import local_path
 from mission_tracking import add_evidence, definition_revision, evidence_state, fingerprint, read_records, revision, save_record
 from peek import mission_filename
 
@@ -100,7 +101,9 @@ def apply(state: Path, action: str, payload: dict):
         records, _ = read_records(directory, "evidence")
         record = next((e for e in records if e["id"] == payload.get("evidenceId") and e["missionId"] == mission["id"]), None)
         if record is None and feed.get("demo"):
-            source_mission = next(m for m in feed["missions"] if m["id"] == mission["id"])
+            source_mission = next((m for m in feed["missions"] if m["id"] == mission["id"]), None)
+            if source_mission is None:
+                raise ValueError("This mission is no longer available")
             record = next((e for c in source_mission["checkpoints"] for e in c.get("records", []) if e["id"] == payload.get("evidenceId")), None)
         if record is None or fingerprint(record) != payload.get("fingerprint"):
             raise ValueError("The evidence record changed or is no longer available.")
@@ -108,9 +111,10 @@ def apply(state: Path, action: str, payload: dict):
         max_age = check.get("maxAgeSeconds", mission.get("evidenceMaxAgeSeconds", 86400)) if check else 86400
         if evidence_state(record, None, rev, max_age, now, feed.get("demo", False)) != "reported":
             raise ValueError("The evidence is stale, unavailable, or belongs to an earlier goal.")
-        if record.get("digest") and str(record.get("reference", "")).startswith("/"):
+        artifact = local_path(record.get("reference"))
+        if record.get("digest") and artifact is not None:
             digest = hashlib.sha256()
-            with Path(record["reference"]).open("rb") as stream:
+            with artifact.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(65536), b""):
                     digest.update(chunk)
             if digest.hexdigest() != record["digest"]:

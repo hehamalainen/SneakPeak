@@ -81,6 +81,9 @@ struct PeekView: View {
             Text(store.disconnected ? "Connection quiet" : store.attentionCount > 0 ? "\(store.attentionCount) decisions" : store.driftCount > 0 ? "\(store.driftCount) course concerns" : store.evidenceGapCount > 0 ? "Evidence incomplete" : store.feed.agents.isEmpty ? "Ready when you are" : "Room to focus")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(store.disconnected ? muted : store.attentionCount > 0 ? amber : mint)
+            if !store.showingDemo, store.hasUnsignedReviews {
+                Text("UNSIGNED").font(.system(size: 7, weight: .semibold)).foregroundStyle(muted)
+            }
             if store.showingDemo { Text("DEMO").font(.system(size: 7, weight: .bold)).foregroundStyle(muted) }
         }
         .frame(maxWidth: .infinity).frame(height: 25).padding(.bottom, 8)
@@ -278,7 +281,7 @@ struct PeekView: View {
                         Text("Sent. Waiting for confirmation from the agent.").font(.system(size: 9)).foregroundStyle(muted)
                     }
                 } else {
-                    Text(request.mode == "handoff" || request.transport != "trusted-local-file" && !store.showingDemo ? "This session needs your answer at its source." : "Request expired. Check the source session.")
+                    Text(request.mode == "handoff" || request.transport != "trusted-local-file" && !store.showingDemo ? "This session needs your answer at its source." : !request.hasValidLifetime ? "This request needs a fresh update. Answer at the source." : "Request expired. Check the source session.")
                         .font(.system(size: 10)).foregroundStyle(muted)
                 }
             }

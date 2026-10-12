@@ -83,16 +83,39 @@ class Registry:
             return str(self.home / path[2:])
         return path
 
+    def pattern_error(self, pattern):
+        if not isinstance(pattern, str) or not pattern or len(pattern) > 4096 or "\0" in pattern:
+            return "Event log path is invalid"
+        expanded = self.expand(pattern)
+        if not Path(expanded).is_absolute():
+            return "Use an absolute event log path"
+        if glob.has_magic(expanded):
+            prefix = re.split(r"[*?\[]", expanded, maxsplit=1)[0]
+            try:
+                literal = Path(prefix) if prefix.endswith("/") else Path(prefix).parent
+                try:
+                    anchor = literal.resolve(strict=True)
+                except FileNotFoundError:
+                    anchor = literal.resolve()  # A source may not have created its log folder yet.
+                roots = (self.home.resolve(), self.directory.resolve())
+            except (OSError, RuntimeError, ValueError):
+                return "Event log folder could not be resolved"
+            if not any(anchor != parent and anchor.is_relative_to(parent) for parent in roots):
+                return "Wildcard scans need a specific folder below home or the state directory"
+        return None
+
     def discover(self, definition: dict):
         files, detected, errors = set(), False, []
-        for pattern in definition["logs"]:
-            if not isinstance(pattern, str) or not pattern:
-                errors.append("Event log path is invalid")
+        patterns = definition["logs"] if definition["enabled"] else []
+        if len(patterns) > 16:
+            errors.append("At most 16 event log paths may be configured")
+            patterns = []
+        for pattern in patterns:
+            error = self.pattern_error(pattern)
+            if error:
+                errors.append(error)
                 continue
             expanded = self.expand(pattern)
-            if not Path(expanded).is_absolute():
-                errors.append("Use an absolute event log path")
-                continue
             anchor = re.split(r"[*?\[]", expanded, maxsplit=1)[0]
             anchor_path = Path(anchor) if anchor.endswith("/") else Path(anchor).parent
             detected = detected or anchor_path.exists()
@@ -141,9 +164,11 @@ def register(directory: Path, name: str, events: str | None = None, event_format
         raise ValueError(warnings[0])
     logs = events or str(directory.resolve() / "custom" / hid / "events.jsonl")
     log = Path(logs).expanduser()
-    if not log.is_absolute():
-        raise ValueError("Use an absolute event log path")
+    if not log.is_absolute() or glob.has_magic(str(log)):
+        raise ValueError("Choose one absolute event log file, without wildcard patterns")
     entries = settings.setdefault("harnesses", [])
+    if not isinstance(entries, list) or any(not isinstance(x, dict) for x in entries):
+        raise ValueError("Harness settings must contain a list of JSON objects")
     if any(x.get("id") == hid for x in entries):
         raise ValueError("A harness with this name is already registered")
     entries.append({"id": hid, "name": name.strip()[:64], "format": event_format, "logs": [str(log)], "enabled": True})

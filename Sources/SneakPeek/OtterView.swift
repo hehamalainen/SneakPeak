@@ -38,7 +38,7 @@ struct OtterGlance: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 5) {
                         Circle().fill(status.color).frame(width: 5, height: 5)
-                        Text(store.showingDemo ? "EXAMPLE · OTTER" : "SNEAKPEEK · OTTER")
+                        Text(store.showingDemo ? "EXAMPLE · OTTER" : store.hasUnsignedReviews ? "SNEAKPEEK · UNSIGNED REVIEWS" : "SNEAKPEEK · OTTER")
                             .font(.system(size: 7, weight: .semibold)).tracking(1).foregroundStyle(.gray)
                     }
                     Text(status.title).font(.system(size: 12, weight: .medium, design: .rounded)).foregroundStyle(status.color)

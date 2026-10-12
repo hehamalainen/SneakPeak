@@ -60,24 +60,32 @@ def atomic_json(path: Path, value: dict) -> None:
 
 
 def request(title: str, detail: str, *, mode: str = "decision", ttl: float = 300) -> dict:
-    return {"id": str(uuid.uuid4()), "title": title, "detail": detail,
+    issued = time.time()
+    return {"id": str(uuid.uuid4()), "issuedAt": issued, "title": title, "detail": detail,
             "choices": [{"id": "accept", "label": "Allow once"},
                         {"id": "decline", "label": "Decline"}] if mode == "decision" else [],
-            "mode": mode, "expiresAt": time.time() + ttl}
+            "mode": mode, "expiresAt": issued + ttl}
 
 
 def read_decision(directory: Path, pending: dict, agent_id: str, *, trusted_local_inline=False) -> str | None:
     """A reply is scoped to the exact outstanding request and has a short lifetime."""
-    if not trusted_local_inline or time.time() >= pending["expiresAt"]:
+    if not trusted_local_inline:
         return None
     try:
+        now = time.time()
+        issued, expiry = pending["issuedAt"], pending["expiresAt"]
+        def timestamp(value):
+            return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+        if not timestamp(issued) or not timestamp(expiry) or not 0 <= issued <= now < expiry:
+            return None
         uuid.UUID(pending["id"])
         data = json.loads((directory / (pending["id"] + ".json")).read_text())
+        created = data["createdAt"]
         valid = (data["requestId"] == pending["id"] and data["agentId"] == agent_id
-                 and pending["expiresAt"] - 3600 <= data["createdAt"] <= time.time() + 5
+                 and timestamp(created) and issued <= created <= min(expiry, now + 5)
                  and data["choiceId"] in {c["id"] for c in pending["choices"]})
         return data["choiceId"] if valid else None
-    except (OSError, ValueError, KeyError, TypeError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError, OverflowError):
         return None
 
 

@@ -64,3 +64,13 @@ Only explicit progress evidence updates the course assessment. `needs_input` cre
 Harness definitions and the history window are stored in the selected state directory’s `harnesses.json` (by default `~/Library/Application Support/SneakPeek`). Definitions contain a stable `id`, display `name`, `format`, `logs`, and `enabled` flag. Log paths must be absolute (or start with `~/`). Built-in roots can be customized in that file; additional formats use the same four known parsers or the standard SneakPeek format.
 
 References: [Copilot event schema](https://docs.github.com/en/copilot/how-tos/copilot-sdk/features/streaming-events), [Copilot hooks](https://docs.github.com/en/copilot/reference/hooks-reference), and [Antigravity hooks](https://www.antigravity.google/docs/hooks).
+
+Custom harness registration accepts one absolute event file, without wildcards.
+Configured wildcard roots must be a specific directory below home or the state
+directory; filesystem-root and whole-home scans are rejected, including symlinked
+roots. Disabled harnesses are not scanned. Built-in discovery remains periodic
+and is not a hard bound against adversarial filesystem size.
+
+Copilot CLI hooks deliberately use `exec` and `args` (direct execution without a
+shell), supported by the [current GitHub hooks reference](https://docs.github.com/en/copilot/reference/hooks-reference#command-hooks).
+These installed-local observer hooks are not a Copilot cloud-agent deployment.
