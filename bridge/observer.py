@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import time
+import uuid
 from common import agent, short, text_content, request
 from harnesses import Registry
 
@@ -35,6 +36,7 @@ class Session:
         self.final_turn = None
         self.file_identity = None
         self.antigravity_request_id = None
+        self.antigravity_children = set()
 
     def initialize(self, session_id: str, cwd: str, parent: str | None = None, name: str | None = None):
         self.cwd = cwd
@@ -167,6 +169,22 @@ class Session:
         a = self.value
         kind = row.get("type", "")
         status = row.get("status", "")
+        calls = row.get("tool_calls")
+        calls = [c for c in calls if isinstance(c, dict)] if isinstance(calls, list) else []
+        # Use an explicitly reported working directory, never infer a workspace
+        # from an arbitrary file being inspected or a hidden reasoning field.
+        workspaces = row.get("workspacePaths")
+        candidates = [row.get("cwd")]
+        if isinstance(workspaces, list):
+            candidates.extend(workspaces)
+        for call in calls:
+            args = call.get("args")
+            if call.get("name") == "run_command" and isinstance(args, dict):
+                candidates.append(args.get("Cwd"))
+        if not self.cwd:
+            self.cwd = next((p for p in candidates if isinstance(p, str) and p.startswith("/") and "\0" not in p), "")
+            if self.cwd:
+                self.mission["workspace"] = self.cwd
         a["lastActivity"] = now
         if kind == "USER_INPUT":
             content = row.get("content", "")
@@ -178,8 +196,40 @@ class Session:
             a.update(status="working", request=None, summary="Working toward the requested outcome")
         elif kind == "PLANNER_RESPONSE":
             # The public transcript may contain a separate `thinking` field. Never read it.
-            a.update(summary=short(row.get("content", "")) or "An agent update was observed",
-                     status="working" if status == "RUNNING" else "observed")
+            text = short(row["content"]) if isinstance(row.get("content"), str) else ""
+            descriptions = []
+            for call in calls:
+                args = call.get("args") if isinstance(call.get("args"), dict) else {}
+                label = args.get("toolAction") or args.get("toolSummary") or call.get("name")
+                if isinstance(label, str) and label.strip():
+                    descriptions.append(label)
+            if descriptions:
+                a["summary"] = short(" · ".join(descriptions))
+            elif text:
+                a["summary"] = text
+            # DONE completes a planner step, not the agent/background loop.
+            a["status"] = "attention" if a["request"] or status == "ERROR" else "working" if calls or status == "RUNNING" else "observed"
+        elif kind == "INVOKE_SUBAGENT" and status == "DONE":
+            content = row.get("content")
+            marker = "Created the following subagents:"
+            if isinstance(content, str) and marker in content:
+                for block in re.findall(r"\{[^{}]*\}", content.split(marker, 1)[1]):
+                    try:
+                        child = json.loads(block).get("conversationId")
+                        child = str(uuid.UUID(child))
+                    except (ValueError, TypeError, AttributeError):
+                        continue
+                    if child != a["sessionId"]:
+                        self.antigravity_children.add(child)
+        elif kind == "STOP":
+            if status == "ERROR" or row.get("error") or row.get("terminationReason") in {"error", "max_steps_exceeded"}:
+                a.update(status="attention", request=None, summary="The agent stopped before a clean handoff. Check the session.")
+            elif row.get("fullyIdle") is True:
+                a.update(status="done", request=None, summary="The agent loop and background tasks have finished. Review the outcome.")
+            elif row.get("fullyIdle") is False:
+                a.update(status="attention" if a["request"] else "working", summary="The foreground loop stopped; background tasks are still active")
+            else:
+                a["status"] = "attention" if a["request"] else "observed"
         elif kind in {"ASK_QUESTION", "ASK_PERMISSION", "ASK_USER"}:
             interaction_id = row.get("id") or row.get("step_id")
             if status == "DONE":
@@ -192,7 +242,9 @@ class Session:
         elif kind == "ERROR_MESSAGE" or status == "ERROR":
             a.update(status="attention", summary="Antigravity reported an error. Check the session.")
         elif status == "RUNNING":
-            a.update(status="working", summary="The agent is running a step")
+            a["status"] = "attention" if a["request"] else "working"
+            if not a.get("summary"):
+                a["summary"] = "The agent is running a step"
         elif kind not in {"SYSTEM_MESSAGE", "EPHEMERAL_MESSAGE", "CONVERSATION_HISTORY", "CHECKPOINT", "KNOWLEDGE_ARTIFACTS"}:
             a["status"] = "observed"
 
@@ -336,6 +388,7 @@ class Session:
                     self.mission, self.cwd, self.parent_id, self.pending_call = None, "", None, None
                     self.children.clear(); self.copilot_requests.clear(); self.final_turn = None
                     self.antigravity_request_id = None
+                    self.antigravity_children.clear()
                 self.file_identity = identity
                 stream.seek(self.offset)
                 while line := stream.readline():
@@ -383,6 +436,18 @@ class Observer:
         for session in self.sessions.values():
             session.refresh()
         indexed = {s.value["id"]: s for s in self.records() if s.value}
+        # Link only discovered child IDs explicitly returned by the parent tool.
+        # Do not open arbitrary transcript paths supplied inside a log record.
+        parents = {}
+        for session in self.sessions.values():
+            if session.parser == "antigravity" and session.value:
+                for child in session.antigravity_children:
+                    parents.setdefault(session.namespace + ":" + child, set()).add(session.value["id"])
+        for session in self.sessions.values():
+            if session.parser == "antigravity" and session.value:
+                owners = parents.get(session.value["id"], set())
+                session.parent_id = next(iter(owners)) if len(owners) == 1 else None
+        unknown_scope = {}
         for session in self.records():
             if session.value is None:
                 continue
@@ -393,6 +458,8 @@ class Observer:
                 root = indexed[root.parent_id]
             scope_cwd = root.cwd or session.cwd
             if self.project and (not scope_cwd or not Path(scope_cwd).resolve().is_relative_to(self.project)):
+                if not scope_cwd:
+                    unknown_scope[session.namespace] = unknown_scope.get(session.namespace, 0) + 1
                 continue
             if now - session.value["lastActivity"] > self.registry.recent_hours * 3600:
                 continue
@@ -408,4 +475,5 @@ class Observer:
             agents.append(value)
         for catalog in self.catalog:
             catalog["sessionCount"] = sum(a.get("harnessId") == catalog["id"] for a in agents)
+            catalog["unscopedSessions"] = unknown_scope.get(catalog["id"], 0)
         return list(missions.values()), agents

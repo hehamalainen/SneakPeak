@@ -12,6 +12,8 @@ SneakPeek 0.3 includes Codex, Claude Code, Antigravity, and GitHub Copilot as pe
 
 Copilot uses `~/.copilot/session-state/*/events.jsonl`. Antigravity uses public transcripts from its desktop app, IDE, and CLI under their respective `~/.gemini/…/brain/` folders. The observer excludes private reasoning text. Recorded permission requests are surfaced as handoffs; answer them in the source application. These two observer connections do not grant permission from the notch.
 
+Antigravity tool calls show their public action or summary. An absolute reported working directory allows project filtering; sessions without a reported workspace are excluded from a project scope and explained in the harness card. Explicit child conversation IDs in subagent results link discovered workers to their parent mission. A planner `DONE` step is only an observed update: work may continue. Lifecycle hooks provide stronger loop/background-idle information. See the [review dispositions](antigravity-review-followup.txt).
+
 The normal history window is 24 hours. An installed harness with no recent session shows **waiting**, with its last log update, instead of disappearing. Choose 7 or 30 days in the manager if you want older sessions visible. An old session is history, not evidence of a currently running agent.
 
 The local prototype observes at most the 100 newest eligible log files per harness. The manager and peek warn when additional recent logs are omitted. That is a log-file limit, not a worker-count guarantee; a file can contain multiple sessions or subagents. Project filtering occurs after this selection. See [scale limits and the proposed architecture](scaling.md) before using it for a larger fleet.

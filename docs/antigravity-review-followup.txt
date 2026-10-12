@@ -1,0 +1,92 @@
+ANTIGRAVITY REVIEW — FINDINGS AND DISPOSITION
+Reviewed against merged main fb1d979 (PRs #4 and #5 included).
+
+1A. Planner DONE / completion — PUSH BACK ON PROPOSED FIX
+DONE describes a transcript step, not an idle agent loop. A bounded, read-only
+inspection of eight recent local public transcripts found 390 planner DONE
+steps without tool calls followed by more tool work before another USER_INPUT.
+No explicit STOP rows appeared in that sample. No transcript content, paths or
+conversation IDs are included in this report or the synthetic test fixtures.
+Keep planner-only updates as observed. A STOP row must explicitly report
+fullyIdle=true before it can become done; failures remain attention. Existing
+hooks already use fullyIdle and distinguish foreground stop from background
+work. Done means a reported runtime handoff, never a verified mission.
+The suggested rest/raft consequence is also overstated: Cove resting requires
+a fresh feed and a confirmed clear queue; linking paws additionally requires
+fresh reported course, not a done status alone.
+
+1B. Project filter / missing cwd — FIXED
+Read absolute cwd/workspacePaths metadata or run_command args.Cwd. Anchor the
+first reported workspace instead of following every later command directory.
+Do not guess a project from a dependency file path or hidden reasoning. Children
+inherit their discovered root's scope. Unknown-scope sessions remain excluded
+by --project, with an explicit explanation in the harness card detail and a
+coverage warning. A partial connected catalog cannot hide that missing scope.
+
+1C. Tools and summary — FIXED
+Planner rows with tool calls remain working. Use public args.toolAction,
+args.toolSummary or the tool name; do not expose command arguments or reasoning.
+Empty updates preserve the previous meaningful summary. Tool activity cannot
+clear a pending human question. Errors retain attention.
+
+1D. Subagent ownership — FIXED FOR THE OBSERVED RESPONSE FORMAT
+The public INVOKE_SUBAGENT result contains a 'Created the following subagents:'
+section with conversationId and logAbsoluteUri fields. Link its explicit IDs to
+already discovered sessions in the same harness namespace, including nested
+teams. Never open the supplied URI. Ambiguous parent claims remain unlinked;
+unknown response formats remain independent sessions. These are reported links,
+not authenticated producer identity. Rotation discards old links and scope.
+
+2A. Recurring main-thread feed work — FIXED
+Live feed reads, JSON decoding and native evidence projection/hashing run on a
+background actor. Only one read is in flight; ticks coalesce. Results from a
+previous live/example mode or signing context cannot publish over current UI.
+The one-second timer still updates time-dependent expiry and quiet-agent state.
+Deterministic non-polling fixture stores retain a synchronous entry point. Rare
+settings reads and the explicit mock-confirmation read are not moved by this
+change. File watching is deferred: atomic replacement requires directory/rearm
+handling, and evidence can change independently of state.json. Background
+polling is the small, robust prototype fix; no scaling claim is made.
+
+2B. Approval surface writes — FIXED WITH A REQUIRED HEARTBEAT
+Do not stop writing solely because fields are unchanged: the receiver rejects
+heartbeats older than ten seconds. Publish an unchanged live value every four
+seconds, and state/provider changes immediately, on an ordered background
+queue. This removes three of four steady-state writes. Repeated unlive values
+need no heartbeat. Shutdown drains pending writes and records unlive before
+exit. The quoted 86,400 writes/day describes the former once-per-second cadence;
+the claimed SSD wear/power-state impact was not measured and is not asserted.
+
+2C. Displays / root replacement — FIXED, WITH NARROWER IMPACT
+Start on the active display (pointer display, with main-screen fallback), retain
+the selected display while it remains available, and add 'Move to this display'
+to the menu. Topology changes update an observable geometry value in the same
+hosting tree; they do not replace the root. The old code could reset the notch's
+selected pane. The review's claim that it destroyed all editors/playgrounds is
+too broad: those are separate windows. Physical monitor plug/unplug testing is
+deferred to a safe hardware session; pure display-selection cases are tested.
+
+3A. Scaling / SQLite — PARTLY VALID, DEFERRED FOR THIS RESEARCH PROTOTYPE
+The observer already tails each JSONL using file identity and byte offset; it
+does not reread all 100 files from byte zero every eight seconds. Discovery runs
+about every eight seconds; the watch/projection/full-state write loop currently
+runs every second. Full mission reduction and JSON rewriting are real future
+costs. The discovery cap is an explicit coverage limit, not measured evidence
+that 100 logs saturate a CPU. SQLite/WAL or incremental projections may be useful
+after measurement. SQLite alone does not supply producer identity, completeness,
+or supervision semantics. Retain the prototype and docs/scaling.md benchmark
+plan; no storage migration or fleet-capacity promise is included here.
+
+3B. Read-error grace period — PUSH BACK
+Do not leave approvals live for two or three failed reads. The current feed is
+unknown at the first failure. Clear simulated acceptance, show Cove's unseen
+pose and revoke availability immediately. The next valid read restores it and
+clears the connection error. Atomic rename normally avoids an intermediate
+partial JSON file. The new async path preserves this conservative behavior.
+
+Validation: 108 Python and 59 Swift tests passed. Synthetic parser/scope/team/
+rotation regressions; native
+background-read coalescing, stale-mode rejection, immediate failure/recovery,
+heartbeat write reduction/ordering and display selection. The isolated Apple
+Silicon release app built and its development signature verified. No installed app, observer,
+running job, real signing key or Cove demo is changed by this review branch.

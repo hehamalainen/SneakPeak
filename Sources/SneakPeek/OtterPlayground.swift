@@ -75,8 +75,10 @@ enum OtterDemoScene: String, CaseIterable, Identifiable {
         self.scene = scene
         store.now = Date().timeIntervalSince1970
         do {
-            store.feed = try scene.feed(now: store.now)
-            store.showingDemo = true
+            guard store.loadSyntheticPreview(try scene.feed(now: store.now)) else {
+                store.message = "Open Cove in its separate playground"
+                return
+            }
             store.selectedMissionId = "otter-playground"
             store.message = nil
             replay += 1
