@@ -101,7 +101,7 @@ class ReviewHardeningTests(unittest.TestCase):
 
     def test_malformed_request_fields_are_rejected_without_a_traceback(self):
         pending = request('Synthetic permission', 'DO NOT EXECUTE')
-        for field, value in [('id', 17), ('id', None), ('issuedAt', True), ('expiresAt', float('inf'))]:
+        for field, value in [('id', 17), ('id', None), ('issuedAt', True), ('issuedAt', -1), ('expiresAt', float('inf'))]:
             with self.subTest(field=field, value=value):
                 changed = dict(pending, **{field: value})
                 self.assertIsNone(read_decision(self.directory, changed, 'a', trusted_local_inline=True))

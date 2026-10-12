@@ -61,8 +61,14 @@ public struct Intervention: Codable, Identifiable, Sendable {
     public var expiresAt: Double
     public var issuedAt: Double?
     public var transport: String?
+    public var hasValidLifetime: Bool {
+        guard let issuedAt else { return false }
+        return issuedAt.isFinite && issuedAt >= 0 && expiresAt.isFinite && issuedAt < expiresAt
+    }
     public func canAnswer(at now: Double) -> Bool {
-        mode == "decision" && now < expiresAt && !choices.isEmpty
+        guard let issuedAt, hasValidLifetime else { return false }
+        return mode == "decision" && UUID(uuidString: id) != nil
+            && now.isFinite && issuedAt <= now && now < expiresAt && !choices.isEmpty
     }
 }
 
@@ -162,9 +168,9 @@ public enum DecisionError: Error, Equatable { case invalidRequest, expired, inva
 public enum DecisionWriter {
     public static func write(agent: Agent, choice: String, directory: URL, now: Double) throws {
         guard let request = agent.request, UUID(uuidString: request.id) != nil,
-              request.mode == "decision" else { throw DecisionError.invalidRequest }
-        guard now.isFinite, now < request.expiresAt,
-              request.issuedAt.map({ $0.isFinite && $0 <= now }) ?? true else { throw DecisionError.expired }
+              request.mode == "decision", let issuedAt = request.issuedAt,
+              request.hasValidLifetime else { throw DecisionError.invalidRequest }
+        guard now.isFinite, issuedAt <= now, now < request.expiresAt else { throw DecisionError.expired }
         guard request.choices.contains(where: { $0.id == choice }) else { throw DecisionError.invalidChoice }
         let decision = Decision(requestId: request.id, agentId: agent.id, choiceId: choice, createdAt: now)
         let data = try JSONEncoder().encode(decision)

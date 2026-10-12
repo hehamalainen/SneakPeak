@@ -12,6 +12,7 @@ import time
 import uuid
 from common import atomic_json
 from validation import number
+from evidence_reference import inspectable, local_path, normalize
 
 
 def identifier(value):
@@ -88,8 +89,7 @@ def save_record(directory: Path, category: str, record):
 
 def reference_available(value):
     # A reference enables inspection. It is not fetched or treated as proof.
-    return isinstance(value, str) and bool(value.strip()) and (
-        value.startswith("/") or value.startswith("https://") or value.startswith("file:///"))
+    return inspectable(value)
 
 
 def fingerprint(record):
@@ -112,16 +112,17 @@ def evidence_state(record, review, goal_revision, max_age, now, demo=False):
     if not reference_available(record.get("reference")) and not (demo and str(record.get("reference", "")).startswith("demo://")):
         return "missingReference"
     local = record.get("localFile")
-    if str(record.get("reference", "")).startswith("/"):
+    path = local_path(record.get("reference"))
+    if path is not None:
         try:
-            stat = Path(record["reference"]).stat()
-            if not Path(record["reference"]).is_file():
+            stat = path.stat()
+            if not path.is_file():
                 return "missingArtifact"
             if not local:
                 return "missingReference"
             if stat.st_size != local.get("size") or str(stat.st_mtime_ns) != local.get("modifiedNS"):
                 return "artifactChanged"
-        except OSError:
+        except (OSError, ValueError):
             return "missingArtifact"
     if (review and review.get("goalRevision") == goal_revision and review.get("evidenceId") == record["id"]
             and review.get("fingerprint") == fingerprint(record)
@@ -292,11 +293,12 @@ def add_evidence(directory, mission, checkpoint_id, summary, reference, verdict=
         raise ValueError("Checkpoint not found")
     if verdict not in {"supports", "contradicts", "unknown"} or not summary.strip():
         raise ValueError("Provide an evidence summary and a valid claim")
+    reference = normalize(reference)
     value = {"id": str(uuid.uuid4()), "missionId": mission["id"], "checkpointId": checkpoint_id,
              "goalRevision": revision(mission), "summary": summary[:10000], "reference": reference[:2048],
              "verdict": verdict, "actor": actor, "source": "report", "observedAt": time.time(), "digest": None}
-    if reference.startswith("/"):
-        path = Path(reference)
+    path = local_path(value["reference"])
+    if path is not None:
         if path.is_file():
             digest = hashlib.sha256()
             with path.open("rb") as stream:

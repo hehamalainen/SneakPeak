@@ -281,7 +281,7 @@ struct PeekView: View {
                         Text("Sent. Waiting for confirmation from the agent.").font(.system(size: 9)).foregroundStyle(muted)
                     }
                 } else {
-                    Text(request.mode == "handoff" || request.transport != "trusted-local-file" && !store.showingDemo ? "This session needs your answer at its source." : "Request expired. Check the source session.")
+                    Text(request.mode == "handoff" || request.transport != "trusted-local-file" && !store.showingDemo ? "This session needs your answer at its source." : !request.hasValidLifetime ? "This request needs a fresh update. Answer at the source." : "Request expired. Check the source session.")
                         .font(.system(size: 10)).foregroundStyle(muted)
                 }
             }

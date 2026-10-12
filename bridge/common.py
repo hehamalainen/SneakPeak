@@ -76,7 +76,7 @@ def read_decision(directory: Path, pending: dict, agent_id: str, *, trusted_loca
         issued, expiry = pending["issuedAt"], pending["expiresAt"]
         def timestamp(value):
             return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
-        if not timestamp(issued) or not timestamp(expiry) or not issued <= now < expiry:
+        if not timestamp(issued) or not timestamp(expiry) or not 0 <= issued <= now < expiry:
             return None
         uuid.UUID(pending["id"])
         data = json.loads((directory / (pending["id"] + ".json")).read_text())

@@ -11,6 +11,7 @@ import sys
 import time
 import uuid
 from common import atomic_json
+from evidence_reference import local_path
 from mission_tracking import add_evidence, definition_revision, evidence_state, fingerprint, read_records, revision, save_record
 from peek import mission_filename
 
@@ -110,9 +111,10 @@ def apply(state: Path, action: str, payload: dict):
         max_age = check.get("maxAgeSeconds", mission.get("evidenceMaxAgeSeconds", 86400)) if check else 86400
         if evidence_state(record, None, rev, max_age, now, feed.get("demo", False)) != "reported":
             raise ValueError("The evidence is stale, unavailable, or belongs to an earlier goal.")
-        if record.get("digest") and str(record.get("reference", "")).startswith("/"):
+        artifact = local_path(record.get("reference"))
+        if record.get("digest") and artifact is not None:
             digest = hashlib.sha256()
-            with Path(record["reference"]).open("rb") as stream:
+            with artifact.open("rb") as stream:
                 for chunk in iter(lambda: stream.read(65536), b""):
                     digest.update(chunk)
             if digest.hexdigest() != record["digest"]:

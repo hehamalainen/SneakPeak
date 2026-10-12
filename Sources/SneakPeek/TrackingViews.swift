@@ -168,6 +168,9 @@ struct QueueInspector: View {
                                 Text("The reply is scoped to this host request. It stays pending until the host confirms.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
+                            if !request.hasValidLifetime && request.mode == "decision" {
+                                Text("This request needs a fresh update. Answer at the source.").font(.caption).foregroundStyle(.secondary)
+                            }
                             if !store.showingDemo && request.transport != "trusted-local-file" {
                                 Text("Answer this permission in its source session.").font(.caption).foregroundStyle(.secondary)
                             }

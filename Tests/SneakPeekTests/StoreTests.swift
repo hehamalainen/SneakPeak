@@ -15,7 +15,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
             "status": "attention", "summary": "Waiting", "lastActivity": now, "lastProgress": now,
             "evidence": "Original A", "nextStep": "Review", "trajectory": "unknown",
             "request": ["id": UUID().uuidString, "title": "Allow?", "detail": "A synthetic command", "mode": "decision", "transport": "trusted-local-file",
-                        "choices": [["id": "accept", "label": "Allow once"]], "expiresAt": now + 300]]]]
+                        "choices": [["id": "accept", "label": "Allow once"]], "issuedAt": now, "expiresAt": now + 300]]]]
     let encoded = try JSONSerialization.data(withJSONObject: data)
     try encoded.write(to: directory.appendingPathComponent(demo ? "demo-state.json" : "state.json"))
     return try JSONDecoder().decode(Feed.self, from: encoded)
@@ -550,4 +550,20 @@ func isolatedCoveLaunchCannotUseLiveStateOrStartAnObserver(bundleIdentifier: Str
     #expect(!store.recording)
     #expect((store.message ?? "").utf8.count <= 32_768)
     if exitCode == 1 { #expect(store.message?.hasPrefix("Synthetic failure:") == true) }
+}
+
+@Test @MainActor func aLegacyRequestNeverShowsAsSentOrCreatesADecision() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false,
+                          ownsApprovalSurface: false, automaticReload: false)
+    store.feed.agents[0].request?.issuedAt = nil
+    let agent = store.feed.agents[0]
+    #expect(!agent.request!.canAnswer(at: store.now))
+    store.answer(agent, agent.request!.choices[0])
+    #expect(store.sentRequests.isEmpty)
+    #expect(store.message != "Decision sent · waiting for the agent to confirm")
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
 }

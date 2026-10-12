@@ -67,3 +67,23 @@ reply timing, and 256 KiB on BOTH process streams before consuming 256 KiB input
 Fresh-source packaging passed for arm64 and x86_64, produced all six GIFs, and
 passed ZIP integrity checks. Synthetic native captures show the unsigned marker
 and the withdrawn incomplete-coverage pose.
+
+SECOND REVIEW ROUND — ef28289
+Both remaining P2 findings reproduced and were fixed:
+- Native canAnswer and DecisionWriter now require the same valid issuedAt/expiry
+  interval as the receiver. A legacy request offers no reply action, creates no
+  decision file, and never shows as sent. Legitimate synthetic fixtures carry an
+  issue time. Missing timing gets a source-handoff message.
+- Supported local file URLs are percent-decoded and normalized before snapshots
+  and hashing. Existing URL-form records use the same local checks on projection
+  and review, including digest checks when size/mtime have been preserved.
+  Missing files cannot be accepted; old records lacking snapshots need fresh
+  evidence. Remote, malformed, query/fragment and invalid-encoding file URLs are
+  not reviewable. This preserves Finder's non-launching inspection policy.
+New total: 99 Python + 38 Swift tests passed locally (137).
+
+The previous 128 count is now independently visible in successful CI logs:
+https://github.com/hehamalainen/SneakPeak/actions/runs/38254611711
+Python jobs on 3.9 and 3.14 each logged 93 tests; the native job logged 93 Python
+and 35 Swift tests, plus a successful release build. Packaging/UI assertions
+remain locally executed validation, not live-provider or hardware validation.
