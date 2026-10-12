@@ -1,0 +1,38 @@
+COVE — CLEARER GESTURES DEMO
+
+Open Cove Gestures.app. This is a separate synthetic playground; the native
+SneakPeek app, observer and running jobs are not connected to it.
+
+Press Play demo or Space for the 32-second walkthrough.
+Select any scene to stop playback and try it directly.
+Replay gesture shows the selected movement again.
+
+WHAT TO LOOK FOR
+Needs you: paw lifts high, waves twice, then stays raised. Acknowledge example
+clears only this example and returns Cove to watching.
+Watching: upright open-eyed bust, quiet after one entrance.
+Resting: a horizontal, closed-eye belly-up pose after an explicitly clear queue.
+Can't see: a turned back, withdrawal and crossed-eye mark. This never means rest.
+Holding paws: TWO otters visibly converge at their central paws, then settle.
+Drift: the pair wakes, paws release and one member moves outward and tilts.
+Rejoin: the space closes and the paw link is restored.
+
+At a glance previews show the same selected scene at 32 and 64 points.
+Otter only shows the selected character OR PAIR as a draggable floating
+companion. Click it, Return or Space to restore controls.
+To watch all scenes in the floating view, start Play demo and then Otter only.
+Command-Q exits only this demo. No idle animation loops. Reduce Motion shows
+settled poses immediately.
+
+Gesture recordings contains six GIFs captured from the real SwiftUI renderer.
+These GIFs repeat for presentations; the app gestures play once and settle.
+
+BUILD FROM SOURCE
+python3 scripts/prepare-cove-source.py
+runtime/cove-gestures-source/scripts/test.sh --scratch-path runtime/cove-gestures-tests
+scripts/package-cove-gestures.sh
+
+Requires macOS 14+. Packaging requires the Swift toolchain and Pillow for
+optional capture inspection; the finished app needs no Python or repository.
+The app is locally signed, not notarized. Intel is compiled but runtime/UI
+checks were performed on Apple silicon.

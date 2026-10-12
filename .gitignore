@@ -14,3 +14,7 @@ venv/
 *.dSYM/
 # UI captures may include private session data; opt in only after review.
 docs/*preview*.png
+
+# Generated apps, render captures, private resume checkpoints and local design scratch.
+output/
+tmp/

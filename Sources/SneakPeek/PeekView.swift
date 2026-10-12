@@ -20,10 +20,16 @@ struct PeekView: View {
     @ObservedObject var store: PeekStore
     let cameraHeight: CGFloat
     @State private var pane = "queue"
+    init(store: PeekStore, cameraHeight: CGFloat, showRaft: Bool = false) {
+        self.store = store
+        self.cameraHeight = cameraHeight
+        _pane = State(initialValue: showRaft ? "team" : "queue")
+    }
     var body: some View {
         VStack(spacing: 0) {
             cameraRow
             if store.expanded { expandedView }
+            else if store.companionMode == .otter { OtterGlance(store: store).padding(.bottom, 8) }
             else { glance }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -35,7 +41,9 @@ struct PeekView: View {
         .foregroundStyle(Color(red: 0.92, green: 0.93, blue: 0.91))
         .font(.system(size: 12))
         .preferredColorScheme(.dark)
-        .onHover { store.hover($0) }
+        .onHover { inside in
+            if store.companionMode == .native || store.expanded { store.hover(inside) }
+        }
     }
 
     private var cameraRow: some View {
@@ -120,7 +128,7 @@ struct PeekView: View {
                 HStack(spacing: 20) {
                     tab("Queue", selected: pane == "queue") { pane = "queue" }
                     tab("Checkpoints", selected: pane == "checks") { pane = "checks" }
-                    tab("Team", selected: pane == "team") { pane = "team" }
+                    tab(store.companionMode == .otter ? "Raft" : "Team", selected: pane == "team") { pane = "team" }
                     Spacer()
                     Text("\(mission.checkpoints.filter(\.verified).count) checked").font(.system(size: 9)).foregroundStyle(muted)
                 }.padding(.top, 18).padding(.bottom, 12)
@@ -129,6 +137,7 @@ struct PeekView: View {
                     VStack(alignment: .leading, spacing: 9) {
                         if pane == "checks" { checkpointView(mission) }
                         else if pane == "team" {
+                            if store.companionMode == .otter { RaftView(store: store) }
                             ForEach(store.agents) { agent in
                                 agentCard(agent)
                                 if store.selectedAgent?.id == agent.id { detail(agent) }
@@ -331,6 +340,15 @@ struct PeekView: View {
                 Circle().fill(store.disconnected ? amber : mint).frame(width: 4, height: 4)
                 Text(store.showingDemo ? "Example data · try a decision" : "On this Mac · no account connection").font(.system(size: 9)).foregroundStyle(muted)
                 Spacer()
+                Menu {
+                    Button { store.setCompanionMode(.native) } label: {
+                        Label("Native", systemImage: store.companionMode == .native ? "checkmark" : "eye")
+                    }
+                    Button { store.setCompanionMode(.otter) } label: {
+                        Label("Otter", systemImage: store.companionMode == .otter ? "checkmark" : "pawprint")
+                    }
+                } label: { Image(systemName: store.companionMode == .otter ? "pawprint" : "paintbrush") }
+                    .menuStyle(.borderlessButton).fixedSize().help("Choose Native or Otter appearance")
                 Button { store.manageHarnesses() } label: { Image(systemName: "slider.horizontal.3") }
                     .font(.system(size: 10)).foregroundStyle(muted).buttonStyle(.plain).help("Manage harnesses and add another")
                 Button(store.showingDemo ? "Go live ↗" : "Try demo ↗") { store.toggleMode() }

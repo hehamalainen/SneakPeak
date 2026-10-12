@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import Testing
 import SneakPeekCore
 import CryptoKit
@@ -125,4 +126,343 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     #expect(store.sentRequests.isEmpty)
     #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
     #expect(store.message == "Answer this permission in its source session")
+}
+
+@Test @MainActor func otterAppearancePersistsAndPreviewOverrideDoesNotSave() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let state = directory.appendingPathComponent("state.json")
+    let store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false)
+    #expect(store.companionMode == .native)
+    var resized = false
+    store.onResize = { resized = true }
+    store.setCompanionMode(.otter)
+    #expect(resized)
+    let restored = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false)
+    #expect(restored.companionMode == .otter)
+    restored.setCompanionMode(.native, persist: false)
+    #expect(restored.companionMode == .native)
+    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false).companionMode == .otter)
+    store.setCompanionMode(.native)
+    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false).companionMode == .native)
+}
+
+@Test @MainActor func otterSeparatesAttentionActivityAndUnverifiedRest() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false)
+    #expect(store.otterStatus.pose == .attention)
+    // Filtering never hides a decision in another source from the companion.
+    store.filterProvider("Codex")
+    #expect(store.otterStatus.title == "One decision needs you")
+    store.feed.agents[0].request = nil
+    store.feed.agents[0].status = "working"
+    #expect(store.otterStatus.pose == .peeking)
+    #expect(store.otterStatus.tone == .working)
+    store.feed.agents[0].status = "done"
+    #expect(store.otterStatus.pose == .unseen) // Legacy feed has no confirmed queue.
+    store.feed.queue = []
+    #expect(store.otterStatus.pose == .resting)
+    #expect(store.otterStatus.title == "Room to focus")
+    #expect(!store.feed.missions[0].checkpoints[0].verified)
+    store.feed.agents[0].status = "working"
+    store.feed.agents[0].lastActivity = store.now - 301
+    #expect(store.otterStatus.pose == .unseen)
+    #expect(store.otterStatus.title == "An agent has gone quiet")
+    store.feed.agents[0].status = "done"
+    store.feed.warnings = ["Some sessions were omitted"]
+    #expect(store.otterStatus.pose == .peeking)
+    #expect(store.otterStatus.title == "Coverage incomplete")
+    store.feed.generatedAt = store.now - 11
+    #expect(store.otterStatus.tone == .muted)
+    #expect(store.otterStatus.pose == .unseen)
+    #expect(store.otterStatus.title == "I can’t see right now")
+}
+
+@Test @MainActor func raftLinksOnlyFreshReportedCourseAndKeepsEvidenceGapsVisible() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false)
+    store.feed.queue = []
+    var agent = store.feed.agents[0]
+    agent.request = nil; agent.status = "working"; agent.trajectory = "onCourse"
+    #expect(raftCourse(agent, store: store) == .onCourse)
+    agent.trajectory = "atRisk"
+    #expect(raftCourse(agent, store: store) == .atRisk)
+    agent.lastProgress = store.now - 301
+    #expect(raftCourse(agent, store: store) == .unknown)
+    agent.lastProgress = store.now; agent.progressFreshness = "stale"
+    #expect(raftCourse(agent, store: store) == .unknown)
+    agent.progressFreshness = nil; agent.lastActivity = store.now - 301
+    #expect(raftCourse(agent, store: store) == .unknown)
+    agent.lastActivity = store.now; store.feed.generatedAt = store.now - 11
+    #expect(raftCourse(agent, store: store) == .unknown)
+    store.feed.generatedAt = store.now
+    store.feed.agents = []
+    let assessment: [String: Any] = ["goalRevision": "r", "course": "unknown", "evidence": "missing",
+        "requiredCount": 1, "verifiedCount": 0, "reportedCount": 0, "missingCount": 1,
+        "staleCount": 0, "conflictCount": 0, "decisionCount": 0, "coverageIncomplete": false, "reasons": []]
+    store.feed.missions[0].assessment = try JSONDecoder().decode(MissionAssessment.self, from: JSONSerialization.data(withJSONObject: assessment))
+    #expect(store.otterStatus.pose == .peeking)
+    #expect(store.otterStatus.title == "Evidence needs a look")
+    store.feed.missions[0].assessment?.course = "suspectedDrift"
+    #expect(store.otterStatus.title == "A course concern")
+}
+
+@Test @MainActor func playgroundGesturesUseSyntheticMemoryWithoutTouchingState() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let state = directory.appendingPathComponent("state.json")
+    let original = try Data(contentsOf: state)
+    let store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    #expect(store.feed.agents.allSatisfy { $0.provider == "Example" })
+    preview.select(.attention)
+    #expect(store.otterStatus.pose == .attention)
+    let firstRequest = store.otterAttentionSignature
+    preview.select(.attention)
+    #expect(store.otterAttentionSignature != firstRequest)
+    preview.select(.unseen)
+    #expect(store.disconnected)
+    #expect(store.otterStatus.pose == .unseen)
+    preview.select(.quiet)
+    #expect(!store.disconnected)
+    #expect(store.otterStatus.pose == .unseen)
+    preview.select(.resting)
+    #expect(store.otterStatus.pose == .resting)
+    preview.select(.drift)
+    #expect(store.feed.agents.filter { raftCourse($0, store: store) == .atRisk }.count == 1)
+    preview.select(.rejoin)
+    #expect(store.feed.agents.allSatisfy { raftCourse($0, store: store) == .onCourse })
+    #expect(try Data(contentsOf: state) == original)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("approval-surface.json").path))
+}
+
+@Test @MainActor func coveSleepingPairRequiresFreshClearQueueAndTwoFreshReports() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true,
+                          ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    let first = store.feed.agents[0], second = store.feed.agents[1]
+    #expect(coveMaySleep(store: store, first: first, second: second))
+    #expect(!coveMaySleep(store: store, first: first, second: nil))
+    store.feed.queue = nil
+    #expect(!coveMaySleep(store: store, first: first, second: second))
+    preview.select(.attention)
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    preview.select(.drift)
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    preview.select(.quiet)
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    preview.select(.unseen)
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    preview.select(.raft)
+    store.feed.generatedAt = store.now - 11 // Demo mode is no excuse for stale sleep.
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    preview.select(.raft)
+    store.feed.warnings = ["Some sessions were omitted"]
+    #expect(!coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+}
+
+@Test @MainActor func manualGestureSelectionCancelsAutoplay() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true,
+                          ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    preview.playAll(stepDuration: .milliseconds(20))
+    try await waitForDemo { (preview.currentStep ?? 0) >= 1 }
+    preview.select(.unseen)
+    let replay = preview.replay
+    #expect(!preview.playing)
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(preview.scene == .unseen)
+    #expect(preview.replay == replay)
+    #expect(store.otterStatus.pose == .unseen)
+}
+
+@MainActor private func waitForDemo(_ condition: () -> Bool) async throws {
+    let clock = ContinuousClock()
+    let deadline = clock.now.advanced(by: .seconds(5))
+    while !condition(), clock.now < deadline {
+        try await Task.sleep(for: .milliseconds(5))
+    }
+    try #require(condition(), "The synthetic demo did not reach the expected state.")
+}
+
+@Test @MainActor func presenterWalkthroughFinishesOnceWithPawsHeld() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true,
+                          ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    #expect(preview.scene == .raft)
+    #expect(coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    var shownScenes: [OtterDemoScene] = []
+    let subscription = preview.$scene.dropFirst().sink { shownScenes.append($0) }
+    defer { subscription.cancel() }
+    preview.playAll(stepDuration: .milliseconds(20))
+    #expect(preview.playing)
+    try await waitForDemo { !preview.playing }
+    #expect(preview.scene == .raft)
+    #expect(preview.progress == 1)
+    #expect(shownScenes.first == .raft)
+    #expect(shownScenes.last == .raft)
+    for gesture in [OtterDemoScene.working, .attention, .resting, .drift, .rejoin, .unseen] {
+        #expect(shownScenes.filter { $0 == gesture }.count == 1)
+    }
+    #expect(store.showingDemo)
+    #expect(store.feed.agents.allSatisfy { $0.provider == "Example" })
+    #expect(coveMaySleep(store: store, first: store.feed.agents[0], second: store.feed.agents[1]))
+    let replay = preview.replay
+    try await Task.sleep(for: .milliseconds(60))
+    #expect(!preview.playing)
+    #expect(preview.scene == .raft)
+    #expect(preview.replay == replay)
+}
+
+@Test @MainActor func stoppingPresenterWalkthroughKeepsTheCurrentScene() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true,
+                          ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    preview.playAll(stepDuration: .milliseconds(20))
+    try await waitForDemo { (preview.currentStep ?? 0) >= 1 }
+    preview.stop()
+    let scene = preview.scene
+    let replay = preview.replay
+    let step = preview.currentStep
+    let progress = preview.progress
+    #expect(!preview.playing)
+    try await Task.sleep(for: .milliseconds(200))
+    #expect(!preview.playing)
+    #expect(preview.scene == scene)
+    #expect(preview.replay == replay)
+    #expect(preview.currentStep == step)
+    #expect(preview.progress == progress)
+}
+
+@Test @MainActor func acknowledgingCoveExampleClearsThePawWithoutWritingDecisions() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    _ = try fixture(directory, demo: true)
+    let state = directory.appendingPathComponent("state.json")
+    let demoState = directory.appendingPathComponent("demo-state.json")
+    let surface = directory.appendingPathComponent("approval-surface.json")
+    try Data(#"{"live":true,"owner":"existing app"}"#.utf8).write(to: surface)
+    let originals = try [state, demoState, surface].map { try Data(contentsOf: $0) }
+    let store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false)
+    let preview = OtterPlaygroundModel(store: store)
+    preview.select(.attention)
+    #expect(store.attentionCount == 1)
+    #expect(store.otterStatus.pose == .attention)
+    preview.acknowledgeExample()
+    #expect(preview.scene == .working)
+    #expect(store.attentionCount == 0)
+    #expect(store.otterStatus.pose == .peeking)
+    #expect(store.showingDemo)
+    #expect(try [state, demoState, surface].map { try Data(contentsOf: $0) } == originals)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
+    let replay = preview.replay
+    preview.acknowledgeExample()
+    #expect(preview.replay == replay)
+    preview.select(.attention)
+    store.feed.agents[0].provider = "Live source"
+    let guardedReplay = preview.replay
+    preview.acknowledgeExample()
+    #expect(preview.scene == .attention)
+    #expect(store.attentionCount == 1)
+    #expect(preview.replay == guardedReplay)
+    #expect(try [state, demoState, surface].map { try Data(contentsOf: $0) } == originals)
+}
+
+@Test(arguments: [CoveLaunchConfiguration.previewIdentifier, CoveLaunchConfiguration.demoIdentifier, CoveLaunchConfiguration.gestureIdentifier])
+func isolatedCoveLaunchCannotUseLiveStateOrStartAnObserver(bundleIdentifier: String) {
+    let previewState = URL(fileURLWithPath: "/tmp/cove-demo/state.json")
+    let liveState = "/tmp/live-jobs/state.json"
+    let interactive = CoveLaunchConfiguration(bundleIdentifier: bundleIdentifier, defaultStateURL: previewState,
+                                               stateOverride: liveState, renderOnly: false)
+    #expect(interactive.isolated)
+    #expect(!interactive.renderOnly)
+    #expect(interactive.stateURL == previewState)
+    #expect(!interactive.startsObserver)
+    #expect(!interactive.ownsApprovalSurface)
+    #expect(!interactive.reloadsFeed)
+    #expect(!interactive.loadsInitialFeed)
+    #expect(!interactive.persistsAppearance)
+
+    let render = CoveLaunchConfiguration(bundleIdentifier: bundleIdentifier, defaultStateURL: previewState,
+                                        stateOverride: "/tmp/render-fixture/state.json", renderOnly: true)
+    #expect(render.isolated)
+    #expect(render.renderOnly)
+    #expect(render.stateURL == URL(fileURLWithPath: "/tmp/render-fixture/state.json"))
+    #expect(render.loadsInitialFeed)
+    #expect(!render.startsObserver)
+    #expect(!render.ownsApprovalSurface)
+    #expect(!render.reloadsFeed)
+    #expect(!render.persistsAppearance)
+}
+
+@Test func nativeLaunchKeepsItsLiveConnectionAndCoveNotificationsStaySeparate() {
+    let defaultState = URL(fileURLWithPath: "/tmp/native-state.json")
+    let override = "/tmp/requested-live-state.json"
+    let native = CoveLaunchConfiguration(bundleIdentifier: "local.sneakpeek.mission", defaultStateURL: defaultState,
+                                        stateOverride: override, renderOnly: false)
+    #expect(!native.isolated)
+    #expect(native.stateURL == URL(fileURLWithPath: override))
+    #expect(native.startsObserver)
+    #expect(native.ownsApprovalSurface)
+    #expect(native.reloadsFeed)
+    #expect(native.loadsInitialFeed)
+    #expect(native.persistsAppearance)
+    let identifiers = [CoveLaunchConfiguration.previewIdentifier, CoveLaunchConfiguration.demoIdentifier, CoveLaunchConfiguration.gestureIdentifier,
+                       "local.sneakpeek.mission"]
+    #expect(Set(identifiers.map { CoveLaunchConfiguration.notificationName(for: $0) }).count == identifiers.count)
+    #expect(!CoveLaunchConfiguration.isIsolated(nil))
+    #expect(CoveLaunchConfiguration.notificationName(for: nil) == "local.sneakpeek.show")
+}
+
+@Test @MainActor func isolatedStoreDoesNotReadExistingLiveFeedOrAppearance() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let state = directory.appendingPathComponent("state.json")
+    let appearance = directory.appendingPathComponent("appearance.json")
+    let surface = directory.appendingPathComponent("approval-surface.json")
+    try JSONEncoder().encode(CompanionSettings(mode: .otter)).write(to: appearance)
+    try Data(#"{"live":true,"owner":"running app"}"#.utf8).write(to: surface)
+    let originals = try [state, appearance, surface].map { try Data(contentsOf: $0) }
+    let store = PeekStore(stateURL: state, demo: true, ownsApprovalSurface: false, automaticReload: false,
+                          readInitialFeed: false)
+    #expect(store.feed.generatedAt == 0)
+    #expect(store.feed.agents.isEmpty)
+    #expect(store.feed.missions.isEmpty)
+    #expect(store.companionMode == .native)
+    let preview = OtterPlaygroundModel(store: store)
+    store.setCompanionMode(.otter, persist: false)
+    preview.select(.attention)
+    preview.acknowledgeExample()
+    #expect(preview.scene == .working)
+    #expect(store.feed.demo)
+    #expect(store.feed.missions.map(\.id) == ["otter-playground"])
+    #expect(store.feed.agents.allSatisfy { $0.provider == "Example" })
+    #expect(try [state, appearance, surface].map { try Data(contentsOf: $0) } == originals)
+    #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
 }

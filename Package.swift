@@ -7,7 +7,7 @@ let package = Package(
     products: [.executable(name: "SneakPeek", targets: ["SneakPeek"])],
     targets: [
         .target(name: "SneakPeekCore"),
-        .executableTarget(name: "SneakPeek", dependencies: ["SneakPeekCore"]),
+        .executableTarget(name: "SneakPeek", dependencies: ["SneakPeekCore"], resources: [.copy("Resources/Otter")]),
         .testTarget(name: "SneakPeekCoreTests", dependencies: ["SneakPeekCore"]),
         .testTarget(name: "SneakPeekTests", dependencies: ["SneakPeek", "SneakPeekCore"])
     ]

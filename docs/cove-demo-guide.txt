@@ -1,0 +1,42 @@
+COVE DEMO
+
+Open Cove Demo.app. The pair starts together, holding paws.
+Press Play demo or Space for the 32-second walkthrough.
+For a clean presentation, collapse a pinned native SneakPeek glance with its
+chevron if it covers the demo. That hides only the glance; agents keep running.
+
+The story
+1. Holding paws: a clear queue and fresh on-course reports let you focus.
+2. Working: Cove watches quietly.
+3. Paw up: one brief wave tells you a decision needs attention.
+4. Clear queue: Cove settles once that example decision is clear.
+5. Drift: a reported course concern opens the paw link.
+6. Rejoin: a fresh on-course report reconnects the pair.
+7. Can't see: Cove withdraws when visibility is unavailable.
+8. Holding paws: return to the calm state.
+
+Try it yourself
+- Stop demo keeps the current scene. Selecting any scene also stops playback.
+- Replay gesture repeats only the current gesture.
+- In Paw up, Acknowledge example clears only the synthetic request.
+- Cove only leaves the character in the corner of the screen.
+- Drag Cove to reposition it. Click Cove, or press Return/Space while focused,
+  to restore the controls. The paw menu also opens the demo.
+- Command-Q or Quit Cove exits only this demo.
+
+All events are examples held in memory. The demo starts no observer, connects
+to no accounts, changes no live state, and sends no real agent decisions.
+The normal SneakPeek app can remain open independently.
+Holding paws represents fresh agent reports; it is not proof of a verified
+mission. Lost visibility is separate from resting.
+
+Reduce Motion is respected. If it is enabled, gestures settle immediately.
+The Gesture recordings folder contains six looping GIFs for presentation
+backup; in the app each gesture plays once and then settles.
+
+Built for macOS 14 or later, Intel and Apple silicon. No Python, Swift,
+repository checkout, installation step, or account connection is needed
+to run the app. Runtime and UI validation was performed on Apple silicon.
+
+This is a local presentation demo, signed for local development. It is not
+a notarized distribution release.

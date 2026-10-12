@@ -8,6 +8,7 @@ import SwiftUI
     @Published var expanded = false
     @Published var pinned = false
     @Published var showingDemo = false
+    @Published private(set) var companionMode: CompanionMode = .native
     @Published var selectedMissionId: String?
     @Published var selectedAgentId: String?
     @Published var message: String?
@@ -33,13 +34,19 @@ import SwiftUI
     private var closeTask: Task<Void, Never>?
     private var recordProcess: Process?
 
-    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil) {
+    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil, automaticReload: Bool = true, readInitialFeed: Bool = true) {
         self.ownsApprovalSurface = ownsApprovalSurface
         self.missionCommandURL = missionCommandURL
         self.stateURL = stateURL; showingDemo = demo
-        reload()
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.reload() }
+        if readInitialFeed, let data = try? Data(contentsOf: directory.appendingPathComponent("appearance.json")),
+           let settings = try? JSONDecoder().decode(CompanionSettings.self, from: data) {
+            companionMode = settings.mode
+        }
+        if readInitialFeed { reload() }
+        if automaticReload {
+            timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                Task { @MainActor in self?.reload() }
+            }
         }
     }
     var directory: URL { stateURL.deletingLastPathComponent() }
@@ -77,6 +84,55 @@ import SwiftUI
     var driftCount: Int { missions.filter { $0.assessment?.course == "suspectedDrift" }.count }
     var evidenceGapCount: Int { missions.filter { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }.count }
     var disconnected: Bool { feed.isDisconnected(at: now) }
+    var otterAttentionSignature: String {
+        if let queue = feed.queue { return queue.filter(\.needsDecision).map(\.id).sorted().joined(separator: "|") }
+        return feed.agents.filter { $0.needsHuman(at: now) }.map { $0.request?.id ?? $0.id }.sorted().joined(separator: "|")
+    }
+
+    var otterStatus: OtterStatus {
+        if disconnected { return OtterStatus(pose: .unseen, title: "I can’t see right now", detail: "Connection quiet · status unavailable", tone: .muted) }
+        if attentionCount > 0 {
+            let decisionsConfirmed = feed.queue != nil || feed.agents.filter { $0.needsHuman(at: now) }.allSatisfy { $0.request?.canAnswer(at: now) == true }
+            let title = decisionsConfirmed
+                ? (attentionCount == 1 ? "One decision needs you" : "\(attentionCount) decisions need you")
+                : (attentionCount == 1 ? "One agent needs you" : "\(attentionCount) agents need you")
+            return OtterStatus(pose: .attention, title: title, detail: "A paw, then back to your day", tone: .attention)
+        }
+        if feed.warnings?.isEmpty == false {
+            return OtterStatus(pose: .peeking, title: "Coverage incomplete", detail: "Take a closer look", tone: .attention)
+        }
+        if feed.missions.contains(where: { $0.assessment?.course == "suspectedDrift" }) {
+            return OtterStatus(pose: .peeking, title: "A course concern", detail: "Look at the evidence", tone: .attention)
+        }
+        if feed.missions.contains(where: { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }) {
+            return OtterStatus(pose: .peeking, title: "Evidence needs a look", detail: "The outcome is still unverified", tone: .attention)
+        }
+        if !queue.isEmpty {
+            return OtterStatus(pose: .peeking, title: "A few things to review", detail: "Open the queue when ready", tone: .attention)
+        }
+        if feed.agents.contains(where: { $0.isQuiet(at: now) }) {
+            return OtterStatus(pose: .unseen, title: "An agent has gone quiet", detail: "Open the source to check", tone: .muted)
+        }
+        if feed.agents.contains(where: { $0.status == "working" }) {
+            return OtterStatus(pose: .peeking, title: "Keeping an eye on things", detail: "Agents are working", tone: .working)
+        }
+        guard feed.queue != nil else {
+            return OtterStatus(pose: .unseen, title: "The queue isn’t confirmed", detail: "Take a closer look", tone: .muted)
+        }
+        return OtterStatus(pose: .resting, title: feed.agents.isEmpty ? "Ready when you are" : "Room to focus", detail: "No decisions waiting", tone: .resting)
+    }
+
+    func setCompanionMode(_ mode: CompanionMode, persist: Bool = true) {
+        if persist {
+            do {
+                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+                try JSONEncoder().encode(CompanionSettings(mode: mode)).write(to: directory.appendingPathComponent("appearance.json"), options: .atomic)
+            } catch { message = "Could not save the appearance preference"; return }
+        }
+        guard companionMode != mode else { return }
+        companionMode = mode
+        onResize?()
+    }
 
     func reload() {
         now = Date().timeIntervalSince1970

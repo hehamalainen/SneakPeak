@@ -1,0 +1,13 @@
+{
+  "generator": "Built-in image_gen tool",
+  "reference": "Approved flat editorial otter character sheet from this chat",
+  "transparent_background": true,
+  "shared_prompt": "Create a production UI mascot asset using the attached character sheet as an IDENTITY AND STYLE REFERENCE. {pose} Preserve the reference otter exactly: flat 2D editorial vector-like graphic illustration, umber brown and cream flat shapes, restrained shadows, expressive strong dark brows, tiny round ears, tapered whiskers. Clean edges, solid fully opaque character colors, no fur texture, no 3D rendering, no redesigned character. Actual transparent background with alpha, no cast shadow, no text, no watermark. Single character only, with tight balanced framing and a little transparent margin; this asset will appear at 72 pixels high in a macOS notch companion.",
+  "poses": {
+    "peeking.png": "Isolate ONLY the LEFT peeking otter pose from the reference. Remove the black ledge entirely, include head, upper torso and both forepaws resting on an imaginary horizontal edge. Center the single character, front three-quarter face with its wry smile and raised eyebrow. Crop composition to head, shoulders and paws, do not include tail or lower body. There must be no ledge, backdrop, ground or objects.",
+    "attention.png": "Isolate ONLY the MIDDLE upright otter pose from the reference, with one paw raised politely, full body and tail included. Remove the amber circular indicator. Center the single character, alert expression, same half-lidded eyes and wry smile. No props or additional objects.",
+    "resting.png": "Isolate ONLY the RIGHT reclined otter pose from the reference, full body with curved tail and relaxed forepaws on belly. Center the single character, same half-lidded eyes and amused subtle smile. No props or additional objects."
+  },
+  "asset_directory": "Sources/SneakPeek/Resources/Otter",
+  "implementation_note": "The expanded Raft view uses the generated artwork. The 32-point glance uses native vector silhouettes and event-driven limb animation for clarity at small sizes."
+}
