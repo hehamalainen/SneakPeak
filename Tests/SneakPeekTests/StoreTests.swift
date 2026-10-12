@@ -26,12 +26,12 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory); _ = try fixture(directory, demo: true)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, automaticReload: false)
     func surface() throws -> [String: Any] {
         try JSONSerialization.jsonObject(with: Data(contentsOf: directory.appendingPathComponent("approval-surface.json"))) as! [String: Any]
     }
     #expect(try surface()["live"] as? Bool == true)
-    _ = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true, ownsApprovalSurface: false)
+    _ = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: true, ownsApprovalSurface: false, automaticReload: false)
     #expect(try surface()["live"] as? Bool == true) // previews never overwrite the real surface
     store.toggleMode()
     #expect(try surface()["live"] as? Bool == false)
@@ -46,7 +46,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory); _ = try fixture(directory, demo: true)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, automaticReload: false)
     let agent = store.feed.agents[0]
     store.answer(agent, agent.request!.choices[0])
     #expect(store.sentRequests.contains(agent.request!.id))
@@ -75,7 +75,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     project.arguments = ["python3", "-c", #"import sys,json; from pathlib import Path; sys.path.insert(0,sys.argv[1]); from mission_tracking import project; p=Path(sys.argv[2]); p.write_text(json.dumps(project(json.loads(p.read_text()),p.parent)))"#, root.appendingPathComponent("bridge").path, state.path]
     try project.run(); project.waitUntilExit()
     #expect(project.terminationStatus == 0)
-    let store = PeekStore(stateURL: state, demo: false, missionCommandURL: root.appendingPathComponent("bridge/mission_commands.py"))
+    let store = PeekStore(stateURL: state, demo: false, missionCommandURL: root.appendingPathComponent("bridge/mission_commands.py"), automaticReload: false)
     let feed = store.feed
     let folder = directory.appendingPathComponent("missions")
     try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
@@ -119,7 +119,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, automaticReload: false)
     var agent = store.feed.agents[0]
     agent.request?.transport = nil
     store.answer(agent, agent.request!.choices[0])
@@ -134,19 +134,19 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory)
     let state = directory.appendingPathComponent("state.json")
-    let store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false)
+    let store = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false)
     #expect(store.companionMode == .native)
     var resized = false
     store.onResize = { resized = true }
     store.setCompanionMode(.otter)
     #expect(resized)
-    let restored = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false)
+    let restored = PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false)
     #expect(restored.companionMode == .otter)
     restored.setCompanionMode(.native, persist: false)
     #expect(restored.companionMode == .native)
-    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false).companionMode == .otter)
+    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false).companionMode == .otter)
     store.setCompanionMode(.native)
-    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false).companionMode == .native)
+    #expect(PeekStore(stateURL: state, demo: false, ownsApprovalSurface: false, automaticReload: false).companionMode == .native)
 }
 
 @Test @MainActor func otterSeparatesAttentionActivityAndUnverifiedRest() throws {
@@ -154,7 +154,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false, automaticReload: false)
     #expect(store.otterStatus.pose == .attention)
     // Filtering never hides a decision in another source from the companion.
     store.filterProvider("Codex")
@@ -188,7 +188,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     _ = try fixture(directory)
-    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, ownsApprovalSurface: false, automaticReload: false)
     store.feed.queue = []
     var agent = store.feed.agents[0]
     agent.request = nil; agent.status = "working"; agent.trajectory = "onCourse"

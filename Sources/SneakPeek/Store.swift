@@ -34,8 +34,20 @@ import SwiftUI
     private var closeTask: Task<Void, Never>?
     private var recordProcess: Process?
     let humanActionSimulation: HumanActionSimulation?
+    private let backgroundReload: Bool
+    private let feedReader: any FeedReading
+    private let surfacePublisher: ApprovalSurfacePublisher
+    private let surfaceStatePath: String
+    private var refreshTask: Task<Void, Never>?
+    private var refreshAgain = false
+    private var feedEpoch = 0
+    @Published private(set) var feedReadFailed = false
 
-    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil, automaticReload: Bool = true, readInitialFeed: Bool = true, humanActionSimulation: HumanActionSimulation? = nil) {
+    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil, automaticReload: Bool = true, readInitialFeed: Bool = true, humanActionSimulation: HumanActionSimulation? = nil, feedReader: any FeedReading = LocalFeedReader()) {
+        self.backgroundReload = automaticReload
+        self.feedReader = feedReader
+        surfacePublisher = ApprovalSurfacePublisher(directory: stateURL.deletingLastPathComponent())
+        surfaceStatePath = stateURL.standardizedFileURL.resolvingSymlinksInPath().path
         self.humanActionSimulation = humanActionSimulation
         self.ownsApprovalSurface = ownsApprovalSurface
         self.missionCommandURL = missionCommandURL
@@ -85,7 +97,7 @@ import SwiftUI
     var visibleAttentionCount: Int { feed.queue == nil ? visibleAgents.filter { $0.needsHuman(at: now) }.count : visibleQueue.filter(\.needsDecision).count }
     var driftCount: Int { missions.filter { $0.assessment?.course == "suspectedDrift" }.count }
     var evidenceGapCount: Int { missions.filter { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }.count }
-    var disconnected: Bool { !isHumanActionSimulation && feed.isDisconnected(at: now) }
+    var disconnected: Bool { feedReadFailed || (!isHumanActionSimulation && feed.isDisconnected(at: now)) }
     var hasUnsignedReviews: Bool {
         feed.missions.contains { $0.hasUnsignedHumanClaims == true || (($0.assessment?.verifiedCount ?? 0) > 0 && $0.assessment?.authentication == nil) }
     }
@@ -144,23 +156,58 @@ import SwiftUI
     func reload() {
         now = Date().timeIntervalSince1970
         let url = showingDemo ? directory.appendingPathComponent("demo-state.json") : stateURL
-        do {
-            let rawFeed = try JSONDecoder().decode(Feed.self, from: Data(contentsOf: url))
-            let newFeed = HumanProjection.project(rawFeed, simulationJournal: humanActionSimulation?.journal, now: now)
-            feed = newFeed
-            if message == "Connecting to local sessions…" { message = nil }
-            let pendingIDs = Set(newFeed.agents.compactMap { $0.request?.id })
+        let journal = humanActionSimulation?.journal
+        guard backgroundReload else {
+            applyRefresh(LocalFeedReader.readSynchronously(url: url, journal: journal, previous: feed, now: now))
+            return
+        }
+        guard refreshTask == nil else { refreshAgain = true; return }
+        let epoch = feedEpoch, mode = showingDemo, receiptCount = journal?.records.count
+        let previous = feed, readTime = now, reader = feedReader
+        refreshTask = Task { @MainActor [weak self] in
+            let result = await reader.read(url: url, journal: journal, previous: previous, now: readTime)
+            guard let self else { return }
+            self.refreshTask = nil
+            // A previous mode or signing context cannot publish late over the
+            // current one. At most one read runs; additional ticks coalesce.
+            if self.feedEpoch == epoch && self.showingDemo == mode && self.humanActionSimulation?.journal.records.count == receiptCount {
+                self.applyRefresh(result)
+            } else { self.refreshAgain = true }
+            if self.refreshAgain { self.refreshAgain = false; self.reload() }
+        }
+    }
+
+    func waitForRefresh() async {
+        while let task = refreshTask { await task.value }
+    }
+
+    func loadSyntheticPreview(_ snapshot: Feed) -> Bool {
+        guard !ownsApprovalSurface, !backgroundReload,
+              snapshot.missions.map(\.id) == ["otter-playground"],
+              snapshot.agents.allSatisfy({ $0.provider == "Example" && $0.missionId == "otter-playground" }) else { return false }
+        // This non-polling playground's fresh in-memory snapshot replaces its
+        // previous source, including any initial missing-file error.
+        feedEpoch += 1
+        feedReadFailed = false
+        showingDemo = true
+        feed = snapshot
+        return true
+    }
+
+    private func applyRefresh(_ result: FeedReadResult) {
+        feed = result.feed
+        feedReadFailed = !result.succeeded
+        if result.succeeded {
+            if message == "Connecting to local sessions…" || message == "The local feed could not be read. Check the bridge." { message = nil }
+            let pendingIDs = Set(feed.agents.compactMap { $0.request?.id })
             if !sentRequests.subtracting(pendingIDs).isEmpty {
                 sentRequests.formIntersection(pendingIDs)
                 sentByMode[showingDemo] = sentRequests
                 message = showingDemo ? "The example agent received your decision." : "Request cleared by the source · check the latest agent status"
             }
-            if !newFeed.missions.contains(where: { $0.id == selectedMissionId }) { selectedMissionId = newFeed.missions.first?.id }
+            if !feed.missions.contains(where: { $0.id == selectedMissionId }) { selectedMissionId = feed.missions.first?.id }
             if !agents.contains(where: { $0.id == selectedAgentId }) { selectedAgentId = nil }
-        } catch {
-            // A retained projection is no longer current evidence. Preserve claims for
-            // inspection, but clear every simulated acceptance on a failed refresh.
-            feed = HumanProjection.project(feed, simulationJournal: nil, now: now)
+        } else {
             if feed.generatedAt == 0 { message = "Connecting to local sessions…" }
             else { message = "The local feed could not be read. Check the bridge." }
             publishApprovalSurface(live: false)
@@ -168,15 +215,11 @@ import SwiftUI
         }
         publishApprovalSurface()
     }
-    func publishApprovalSurface(live: Bool? = nil) {
+    func publishApprovalSurface(live: Bool? = nil, synchronously: Bool = false) {
         guard ownsApprovalSurface else { return }
-        let value: [String: Any] = ["generatedAt": Date().timeIntervalSince1970,
-                                   "live": live ?? (!showingDemo && !feed.demo && !disconnected && feed.generatedAt > 0),
-                                   "statePath": stateURL.standardizedFileURL.resolvingSymlinksInPath().path,
-                                   "provider": providerFilter]
-        if let data = try? JSONSerialization.data(withJSONObject: value) {
-            try? writePrivate(data, name: "approval-surface.json")
-        }
+        let value = ApprovalSurfaceValue(live: live ?? (!showingDemo && !feed.demo && !disconnected && feed.generatedAt > 0),
+                                         statePath: surfaceStatePath, provider: providerFilter)
+        surfacePublisher.publish(value, at: Date().timeIntervalSince1970, synchronously: synchronously || !backgroundReload)
     }
     func setExpanded(_ value: Bool) {
         closeTask?.cancel()
@@ -200,6 +243,7 @@ import SwiftUI
         publishApprovalSurface(live: false)
         sentByMode[showingDemo] = sentRequests
         showingDemo.toggle(); selectedMissionId = nil; selectedAgentId = nil; message = nil
+        feedEpoch += 1
         sentRequests = sentByMode[showingDemo] ?? []
         feed = .empty; reload()
     }

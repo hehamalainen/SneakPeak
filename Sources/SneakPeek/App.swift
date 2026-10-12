@@ -35,7 +35,8 @@ import SwiftUI
     private var setupProcess: Process?
     private var subscription: AnyCancellable?
     private var keyMonitor: Any?
-    private var cameraHeight: CGFloat = 30
+    private let panelGeometry = PanelGeometry()
+    private var cameraHeight: CGFloat { panelGeometry.cameraHeight }
     private var screen: NSScreen?
     private var previewOnly = false
     private var renderingHarnesses = false
@@ -93,8 +94,8 @@ import SwiftUI
             return
         }
         if !args.contains("--no-bridge") && launch.startsObserver { startBridge(stateURL: stateURL, project: argument("--project")) }
-        screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
-        cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        screen = chooseScreen()
+        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
         panel = NotchPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.isOpaque = false; panel.backgroundColor = .clear; panel.hasShadow = false
         panel.level = .statusBar
@@ -122,7 +123,7 @@ import SwiftUI
         else if previewOnly && trackingPreview == "inspector", let mission = store.mission { panel.contentView = NSHostingView(rootView: MissionInspector(store: store, missionId: mission.id)) }
         else if previewOnly && trackingPreview == "taste", let mission = store.mission { panel.contentView = NSHostingView(rootView: TasteEditor(store: store, mission: mission, checkpoint: nil, close: {})) }
         else if previewOnly && trackingPreview == "queue" { panel.contentView = NSHostingView(rootView: QueueManager(store: store)) }
-        else { panel.contentView = NSHostingView(rootView: PeekView(store: store, cameraHeight: cameraHeight, showRaft: args.contains("--render-raft"))) }
+        else { panel.contentView = NSHostingView(rootView: LivePeekRoot(store: store, geometry: panelGeometry, showRaft: args.contains("--render-raft"))) }
         store.onResize = { [weak self] in self?.position(animated: true); self?.updateAppearanceMenu() }
         store.onEdit = { [weak self] mission in self?.edit(mission) }
         store.onManage = { [weak self] in self?.manage() }
@@ -226,10 +227,30 @@ import SwiftUI
     }
 
     @objc private func displayChanged() {
-        screen = NSScreen.screens.first { $0.safeAreaInsets.top > 0 } ?? NSScreen.main
-        cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
-        panel.contentView = NSHostingView(rootView: PeekView(store: store, cameraHeight: cameraHeight))
+        guard panel != nil else { return }
+        screen = chooseScreen(preferred: screen)
+        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        // Update geometry in the existing SwiftUI tree; its selected pane and
+        // other local state survive display topology changes.
         position(animated: false)
+    }
+
+    private func chooseScreen(preferred: NSScreen? = nil) -> NSScreen? {
+        func id(_ value: NSScreen?) -> UInt32? {
+            (value?.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber)?.uint32Value
+        }
+        let displays = NSScreen.screens
+        let active = displays.first { $0.frame.contains(NSEvent.mouseLocation) } ?? NSScreen.main
+        let selected = DisplaySelection.choose(available: displays.compactMap { id($0) }, preferred: id(preferred), active: id(active))
+        return displays.first { id($0) == selected } ?? active
+    }
+
+    @objc private func moveToCurrentDisplay() {
+        guard panel != nil else { return }
+        screen = chooseScreen()
+        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        position(animated: false)
+        showPeek()
     }
 
     private func makeMenu() {
@@ -247,6 +268,7 @@ import SwiftUI
         menu.addItem(withTitle: "SneakPeek · mission glance", action: nil, keyEquivalent: "")
         menu.addItem(.separator())
         let peek = menu.addItem(withTitle: "Peek at agents", action: #selector(togglePeek), keyEquivalent: "p"); peek.target = self
+        let move = menu.addItem(withTitle: "Move to this display", action: #selector(moveToCurrentDisplay), keyEquivalent: ""); move.target = self
         let demo = menu.addItem(withTitle: "Switch live / example", action: #selector(toggleDemo), keyEquivalent: "d"); demo.target = self
         let harnesses = menu.addItem(withTitle: "Manage harnesses…", action: #selector(manage), keyEquivalent: "h"); harnesses.target = self
         let queue = menu.addItem(withTitle: "Decision queue…", action: #selector(queueManager), keyEquivalent: "j"); queue.target = self
@@ -465,7 +487,7 @@ import SwiftUI
         CGImageDestinationFinalize(destination)
     }
     func applicationWillTerminate(_ notification: Notification) {
-        store?.publishApprovalSurface(live: false)
+        store?.publishApprovalSurface(live: false, synchronously: true)
         if let bridge, bridge.isRunning { bridge.terminate() }
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
     }

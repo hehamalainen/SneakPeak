@@ -175,6 +175,10 @@ def merge_feed(missions, agents, directory: Path, harnesses=None, recent_hours=2
                 h["detail"] += f" · {h['omittedLogs']} recent logs omitted; coverage is incomplete"
         if h.get("omittedLogs", 0):
             warnings.append(f"{h['name']}: {h['omittedLogs']} recent logs omitted; monitoring coverage is incomplete")
+        if h.get("unscopedSessions", 0):
+            detail = f"{h['unscopedSessions']} observed sessions lack a reported workspace and were excluded by the project filter"
+            h["detail"] += " · " + detail
+            warnings.append(f"{h['name']}: {detail}; project coverage is incomplete")
     return {"generatedAt": time.time(), "demo": False, "harnesses": catalog,
             "projectRoot": str(Path(project).resolve()) if project else None,
             "missions": [m for mid, m in mission_map.items() if mid in active_missions or mid in pinned],
