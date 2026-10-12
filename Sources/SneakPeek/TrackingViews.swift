@@ -87,7 +87,7 @@ struct MissionInspector: View {
                 Text(check.required == false ? "Optional" : "Required").font(.caption2).foregroundStyle(.secondary)
             }
             if check.kind == "taste" {
-                Text(check.verified ? "Human taste accepted · subjective judgment" : check.status == "rejected" ? "Human taste rejected" : "Your judgment is still missing")
+                Text(check.verified ? "Taste accepted · unsigned local judgment" : check.status == "rejected" ? "Taste rejected · unsigned local judgment" : "Your judgment is still missing")
                     .font(.caption).foregroundStyle(tasteColor)
                 Text(check.evidence).font(.system(size: 12)).foregroundStyle(.secondary)
                 Button("Add your Taste") { store.onTaste?(mission, check) }.buttonStyle(.bordered).foregroundStyle(tasteColor)
@@ -108,7 +108,7 @@ struct MissionInspector: View {
                             Text(reference).font(.system(size: 10, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled).lineLimit(2)
                         }
                         HStack {
-                            Button("Open reference") { store.openEvidence(evidence) }.disabled(store.showingDemo || evidence.reference == nil)
+                            Button(evidence.reference.map { EvidenceReference($0).buttonLabel } ?? "Inspect at source") { store.openEvidence(evidence) }.disabled(store.showingDemo || evidence.reference == nil)
                             Spacer()
                             Button("Check met") { store.review(evidence, mission: mission, verdict: "accept") }
                             Button("Check not met") { store.review(evidence, mission: mission, verdict: "reject") }

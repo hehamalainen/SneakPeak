@@ -150,7 +150,7 @@ def run(args):
 
     threading.Thread(target=reader, daemon=True).start()
     bridge = CodexBridge(state.parent, args.goal, str(Path(args.project).resolve()), send, trusted_local_inline=args.trusted_local_inline)
-    send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "sneakpeek", "title": "SneakPeek", "version": "0.1.0"}}})
+    send({"id": 1, "method": "initialize", "params": {"clientInfo": {"name": "sneakpeek", "title": "SneakPeek", "version": "0.3.1"}}})
     try:
         while not bridge.finished:
             if not approval_surface_available(state, "Codex", bridge.cwd):

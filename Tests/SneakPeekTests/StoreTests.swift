@@ -175,7 +175,7 @@ private func fixture(_ directory: URL, demo: Bool = false) throws -> Feed {
     #expect(store.otterStatus.title == "An agent has gone quiet")
     store.feed.agents[0].status = "done"
     store.feed.warnings = ["Some sessions were omitted"]
-    #expect(store.otterStatus.pose == .peeking)
+    #expect(store.otterStatus.pose == .unseen)
     #expect(store.otterStatus.title == "Coverage incomplete")
     store.feed.generatedAt = store.now - 11
     #expect(store.otterStatus.tone == .muted)
@@ -465,4 +465,89 @@ func isolatedCoveLaunchCannotUseLiveStateOrStartAnObserver(bundleIdentifier: Str
     #expect(store.feed.agents.allSatisfy { $0.provider == "Example" })
     #expect(try [state, appearance, surface].map { try Data(contentsOf: $0) } == originals)
     #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("decisions").path))
+}
+
+@Test @MainActor func incompleteCoverageWithdrawsCoveAndUnsignedChecksAreVisible() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false,
+                          ownsApprovalSurface: false, automaticReload: false)
+    store.feed.agents = []; store.feed.queue = []
+    store.feed.warnings = ["Some logs were omitted"]
+    #expect(store.otterStatus.pose == .unseen)
+    #expect(store.otterStatus.title == "Coverage incomplete")
+    #expect(store.otterStatus.tone == .muted)
+    store.feed.warnings = []
+    let assessment: [String: Any] = ["goalRevision": "r", "course": "readyForReview", "evidence": "verified",
+        "requiredCount": 1, "verifiedCount": 1, "reportedCount": 0, "missingCount": 0,
+        "staleCount": 0, "conflictCount": 0, "decisionCount": 0, "coverageIncomplete": true, "reasons": []]
+    store.feed.missions[0].assessment = try JSONDecoder().decode(MissionAssessment.self,
+                                                                from: JSONSerialization.data(withJSONObject: assessment))
+    #expect(store.otterStatus.pose == .unseen)
+    #expect(store.hasUnsignedReviews)
+}
+
+@Test @MainActor func nativePrivateStateFilesAreNotWorldReadable() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false, automaticReload: false)
+    store.setCompanionMode(.otter)
+    store.setHistoryHours(168)
+    func mode(_ path: URL) throws -> Int {
+        (try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as! NSNumber).intValue & 0o777
+    }
+    #expect(try mode(directory) == 0o700)
+    for name in ["appearance.json", "harnesses.json", "approval-surface.json"] {
+        #expect(try mode(directory.appendingPathComponent(name)) == 0o600)
+    }
+}
+
+@Test @MainActor func respondingUsesTheClickTimeInsteadOfTheLastFeedTick() throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false,
+                          ownsApprovalSurface: false, automaticReload: false)
+    let issued = Date().timeIntervalSince1970 - 0.01
+    store.feed.agents[0].request?.issuedAt = issued
+    store.now = issued - 1 // The observer tick can predate a newly received request.
+    let agent = store.feed.agents[0]
+    store.answer(agent, agent.request!.choices[0])
+    let path = directory.appendingPathComponent("decisions/\(agent.request!.id).json")
+    let decision = try JSONDecoder().decode(Decision.self, from: Data(contentsOf: path))
+    #expect(decision.createdAt >= issued)
+    #expect((try FileManager.default.attributesOfItem(atPath: path.path)[.posixPermissions] as! NSNumber).intValue & 0o777 == 0o600)
+}
+
+@Test(arguments: [0, 1]) @MainActor func recordCommandDrainsLargeOutputWithoutBlockingTheUI(exitCode: Int) async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    _ = try fixture(directory)
+    let script = directory.appendingPathComponent("synthetic-writer.py")
+    // Emit more than a pipe buffer on both streams BEFORE consuming large stdin.
+    // The old runner deadlocked here and blocked the main actor writing its input.
+    let code = """
+    import sys,json
+    sys.stdout.write('x' * 262144); sys.stdout.flush()
+    sys.stderr.write('Synthetic failure: ' + 'e' * 262144); sys.stderr.flush()
+    payload=json.load(sys.stdin)
+    assert len(payload['large']) == 262144
+    sys.exit(\(exitCode))
+    """
+    try Data(code.utf8).write(to: script)
+    let store = PeekStore(stateURL: directory.appendingPathComponent("state.json"), demo: false,
+                          ownsApprovalSurface: false, missionCommandURL: script, automaticReload: false)
+    let success = await withCheckedContinuation { continuation in
+        store.post("synthetic-test", payload: ["large": String(repeating: "p", count: 262144)]) {
+            continuation.resume(returning: $0)
+        }
+    }
+    #expect(success == (exitCode == 0))
+    #expect(!store.recording)
+    #expect((store.message ?? "").utf8.count <= 32_768)
+    if exitCode == 1 { #expect(store.message?.hasPrefix("Synthetic failure:") == true) }
 }

@@ -1,0 +1,69 @@
+ADVERSARIAL REVIEW FOLLOW-UP — 2026-10-12
+Base reviewed: ce36275. Copilot's review was static; Claude exercised the Python
+suite and art, but could not run Swift. This follow-up checks both against source
+and synthetic adversarial regressions. Nothing is installed into the running app.
+
+CONFIRMED AND ADDRESSED
+1. Agent-chosen local evidence could launch scripts, apps or Terminal profiles.
+   All absolute paths and local file URLs now reveal in Finder. There is no safe-
+   extension launch allowlist. Remote file URLs and other schemes are rejected.
+   Antigravity artifact handoff follows the same non-launching approach.
+5. checkpoint could raise StopIteration when an agent's mission disappeared.
+   It now reports a useful error before writing any partial checkpoint.
+6. Malformed Copilot hook handlers/args could raise AttributeError.
+   They now fail with a caught validation error, preserving the existing file.
+7. Decision timestamps could precede the request by nearly an hour.
+   Requests now carry issuedAt, and replies must fall within that exact lifetime.
+   Legacy requests without issue time fail closed. Native replies use click time,
+   not the previous observer tick. This does not authenticate a peer writer.
+8. Swift could create a permissive state directory/file before the Python bridge.
+   New private directories use 0700, files use 0600 from creation through atomic
+   replacement. Default owned state can be repaired; shared explicit parent
+   directories are not silently chmodded.
+9. Output was read after process exit, permitting a pipe-buffer deadlock.
+   Both streams and stdin now run off the main actor. Output is continuously
+   drained, retained error output is bounded, and the owned process is released.
+10. Configurable recursive patterns could scan filesystem root or the whole home.
+    Broad wildcard roots (including symlink roots) are rejected. Custom source
+    registration takes a single file; disabled sources do not scan. Periodic
+    built-in scans remain: this is not an adversarial filesystem/load guarantee.
+Claude coverage nit: incomplete coverage now gives Cove's withdrawn/unseen pose.
+Claude trust concern: accepted checks and Taste judgments are labelled unsigned
+in the main status and inspector. The existing local review writer remains
+forgeable; the authenticated human-action broker is NOT implemented here.
+
+CORRECTIONS TO THE STATIC REVIEW
+3. Missing checked-in apps are expected generated artifacts, not source files.
+   README/build instructions now make that explicit and move Cove detail into
+   its guide. However, the reviewed package-cove-demo.sh already called
+   preview-cove.py BEFORE copying GIFs; claiming no generator existed was wrong.
+   Clean-source packaging is validated separately from static inspection.
+5 (demo review branch). context() already rejects a missing mission before the
+   later next() call. That reported crash path is not reachable with the current
+   flow. An explicit defensive guard and regression are retained.
+11. exec/args is a documented Copilot CLI command-hook format. It avoids shell
+    interpretation and is deliberately retained. It is CLI-only, not a cloud
+    agent configuration. Primary reference:
+    https://docs.github.com/en/copilot/reference/hooks-reference#command-hooks
+
+POLISH AND DEFERRED CHOICES
+README is shorter, core mission/trust content comes before detailed Cove builds.
+Native requirements were already present up front: macOS 14+, Swift 6, Python
+3.9+, zsh. Codex client version now matches native 0.3.1. uuid imports are normal,
+Cove bundle metadata is selected in one case statement, and branch pushes no
+longer duplicate pull-request CI (push runs on main; PR checks remain enabled).
+Pinned action comments were checked against the official action repositories:
+checkout is the releases-v4 backport, setup-python is v6.3.0/v6.
+
+2. Repo rename/description is a branding choice. No GitHub settings are changed.
+Public security design notes are intentional disclosure of limitations. Artwork
+prompts are intentional reproducibility material. Neither is treated as secret.
+No broker, notarization, enterprise scale or authenticated acceptance is claimed.
+
+VALIDATION
+93 Python tests and 35 Swift tests pass, including new hostile paths, malformed
+hooks, old/nonfinite reply timestamps, broad scans, mode checks, stale feed-tick
+reply timing, and 256 KiB on BOTH process streams before consuming 256 KiB input.
+Fresh-source packaging passed for arm64 and x86_64, produced all six GIFs, and
+passed ZIP integrity checks. Synthetic native captures show the unsigned marker
+and the withdrawn incomplete-coverage pose.

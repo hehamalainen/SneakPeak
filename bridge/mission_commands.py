@@ -100,7 +100,9 @@ def apply(state: Path, action: str, payload: dict):
         records, _ = read_records(directory, "evidence")
         record = next((e for e in records if e["id"] == payload.get("evidenceId") and e["missionId"] == mission["id"]), None)
         if record is None and feed.get("demo"):
-            source_mission = next(m for m in feed["missions"] if m["id"] == mission["id"])
+            source_mission = next((m for m in feed["missions"] if m["id"] == mission["id"]), None)
+            if source_mission is None:
+                raise ValueError("This mission is no longer available")
             record = next((e for c in source_mission["checkpoints"] for e in c.get("records", []) if e["id"] == payload.get("evidenceId")), None)
         if record is None or fingerprint(record) != payload.get("fingerprint"):
             raise ValueError("The evidence record changed or is no longer available.")

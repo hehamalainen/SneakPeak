@@ -59,6 +59,7 @@ public struct Intervention: Codable, Identifiable, Sendable {
     public var choices: [Choice]
     public var mode: String
     public var expiresAt: Double
+    public var issuedAt: Double?
     public var transport: String?
     public func canAnswer(at now: Double) -> Bool {
         mode == "decision" && now < expiresAt && !choices.isEmpty
@@ -162,11 +163,11 @@ public enum DecisionWriter {
     public static func write(agent: Agent, choice: String, directory: URL, now: Double) throws {
         guard let request = agent.request, UUID(uuidString: request.id) != nil,
               request.mode == "decision" else { throw DecisionError.invalidRequest }
-        guard now < request.expiresAt else { throw DecisionError.expired }
+        guard now.isFinite, now < request.expiresAt,
+              request.issuedAt.map({ $0.isFinite && $0 <= now }) ?? true else { throw DecisionError.expired }
         guard request.choices.contains(where: { $0.id == choice }) else { throw DecisionError.invalidChoice }
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let decision = Decision(requestId: request.id, agentId: agent.id, choiceId: choice, createdAt: now)
         let data = try JSONEncoder().encode(decision)
-        try data.write(to: directory.appendingPathComponent(request.id + ".json"), options: .atomic)
+        try PrivateStateFiles.write(data, to: directory.appendingPathComponent(request.id + ".json"))
     }
 }

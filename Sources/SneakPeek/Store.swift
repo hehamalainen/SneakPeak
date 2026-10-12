@@ -84,6 +84,9 @@ import SwiftUI
     var driftCount: Int { missions.filter { $0.assessment?.course == "suspectedDrift" }.count }
     var evidenceGapCount: Int { missions.filter { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }.count }
     var disconnected: Bool { feed.isDisconnected(at: now) }
+    var hasUnsignedReviews: Bool {
+        feed.missions.contains { ($0.assessment?.verifiedCount ?? 0) > 0 || $0.checkpoints.contains(where: \.verified) }
+    }
     var otterAttentionSignature: String {
         if let queue = feed.queue { return queue.filter(\.needsDecision).map(\.id).sorted().joined(separator: "|") }
         return feed.agents.filter { $0.needsHuman(at: now) }.map { $0.request?.id ?? $0.id }.sorted().joined(separator: "|")
@@ -99,12 +102,15 @@ import SwiftUI
             return OtterStatus(pose: .attention, title: title, detail: "A paw, then back to your day", tone: .attention)
         }
         if feed.warnings?.isEmpty == false {
-            return OtterStatus(pose: .peeking, title: "Coverage incomplete", detail: "Take a closer look", tone: .attention)
+            return OtterStatus(pose: .unseen, title: "Coverage incomplete", detail: "Some sources are unavailable", tone: .muted)
         }
         if feed.missions.contains(where: { $0.assessment?.course == "suspectedDrift" }) {
             return OtterStatus(pose: .peeking, title: "A course concern", detail: "Look at the evidence", tone: .attention)
         }
         if feed.missions.contains(where: { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }) {
+            if feed.missions.contains(where: { $0.assessment?.coverageIncomplete == true }) {
+                return OtterStatus(pose: .unseen, title: "Coverage incomplete", detail: "Some sources are unavailable", tone: .muted)
+            }
             return OtterStatus(pose: .peeking, title: "Evidence needs a look", detail: "The outcome is still unverified", tone: .attention)
         }
         if !queue.isEmpty {
@@ -125,8 +131,7 @@ import SwiftUI
     func setCompanionMode(_ mode: CompanionMode, persist: Bool = true) {
         if persist {
             do {
-                try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-                try JSONEncoder().encode(CompanionSettings(mode: mode)).write(to: directory.appendingPathComponent("appearance.json"), options: .atomic)
+                try writePrivate(JSONEncoder().encode(CompanionSettings(mode: mode)), name: "appearance.json")
             } catch { message = "Could not save the appearance preference"; return }
         }
         guard companionMode != mode else { return }
@@ -163,9 +168,8 @@ import SwiftUI
                                    "live": live ?? (!showingDemo && !feed.demo && !disconnected && feed.generatedAt > 0),
                                    "statePath": stateURL.standardizedFileURL.resolvingSymlinksInPath().path,
                                    "provider": providerFilter]
-        try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         if let data = try? JSONSerialization.data(withJSONObject: value) {
-            try? data.write(to: directory.appendingPathComponent("approval-surface.json"), options: .atomic)
+            try? writePrivate(data, name: "approval-surface.json")
         }
     }
     func setExpanded(_ value: Bool) {
@@ -199,10 +203,14 @@ import SwiftUI
     }
     func manageHarnesses() { storeFocus(); onManage?() }
     private func storeFocus() { pinned = true }
+    private func writePrivate(_ data: Data, name: String) throws {
+        let defaultDirectory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Application Support/SneakPeek").standardizedFileURL
+        try PrivateStateFiles.write(data, to: directory.appendingPathComponent(name),
+                                    repairDirectory: directory.standardizedFileURL == defaultDirectory)
+    }
     func writeSettings(_ value: HarnessSettings) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        try JSONEncoder().encode(value).write(to: directory.appendingPathComponent("harnesses.json"), options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: directory.appendingPathComponent("harnesses.json").path)
+        try writePrivate(JSONEncoder().encode(value), name: "harnesses.json")
     }
     func enableHarness(_ harness: HarnessInfo, enabled: Bool) {
         var value = settings
@@ -228,7 +236,9 @@ import SwiftUI
         }
         let path = eventPath.trimmingCharacters(in: .whitespacesAndNewlines)
         let file = path.isEmpty ? directory.appendingPathComponent("custom/\(id)/events.jsonl").path : (path as NSString).expandingTildeInPath
-        guard file.hasPrefix("/") else { message = "Choose an absolute event log path"; return false }
+        guard file.hasPrefix("/"), !file.contains(where: { "*?[".contains($0) }) else {
+            message = "Choose one absolute event log file, without wildcard patterns"; return false
+        }
         var value = settings; var definitions = value.harnesses ?? []
         guard !definitions.contains(where: { $0.id == id }) else { message = "That harness is already registered"; return false }
         definitions.append(HarnessDefinition(id: id, name: label, format: format, logs: [file], enabled: true))
@@ -253,7 +263,7 @@ import SwiftUI
         }
         do {
             try DecisionWriter.write(agent: agent, choice: choice.id,
-                                     directory: directory.appendingPathComponent("decisions"), now: now)
+                                     directory: directory.appendingPathComponent("decisions"), now: Date().timeIntervalSince1970)
             sentRequests.insert(request.id)
             sentByMode[showingDemo] = sentRequests
             message = "Decision sent · waiting for the agent to confirm"
@@ -274,9 +284,11 @@ import SwiftUI
             if let path = agent.artifactPath {
                 let folder = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
                 let allowed = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".gemini").path + "/"
-                if folder.path.hasPrefix(allowed) { NSWorkspace.shared.open(folder) }
+                if folder.path.hasPrefix(allowed), FileManager.default.fileExists(atPath: folder.path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([folder])
+                }
             }
-            message = "Conversation ID copied · choose it in \(agent.sourceApp ?? "Antigravity"). Artifacts opened when available."
+            message = "Conversation ID copied · choose it in \(agent.sourceApp ?? "Antigravity"). Artifacts shown in Finder when available."
             return
         }
         let command = agent.provider == "Claude" ? "claude --resume \(id)" : agent.provider == "GitHub Copilot" ? "copilot --resume \(id)" : "codex resume \(id)"
@@ -310,22 +322,22 @@ import SwiftUI
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", script.path, "--state", currentFeedURL.path, "--action", action]
             process.standardInput = input; process.standardOutput = output; process.standardError = errors
+            let drain = CommandPipeDrain(stdout: output, stderr: errors, stdin: input)
             process.terminationHandler = { [weak self] task in
-                _ = output.fileHandleForReading.readDataToEndOfFile()
-                let failure = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "The record could not be saved"
-                let success = task.terminationStatus == 0
+                let (success, failure) = drain.result(exitCode: task.terminationStatus)
                 Task { @MainActor [weak self] in
                     self?.recording = false
+                    self?.recordProcess = nil
                     self?.message = success ? "Recorded · the mission view will refresh" : failure
                     completion?(success)
                 }
             }
             recording = true; recordProcess = process
-            try process.run()
-            try input.fileHandleForWriting.write(contentsOf: data)
-            try input.fileHandleForWriting.close()
+            do { try process.run() }
+            catch { drain.abandon(); throw error }
+            drain.start(input: data, process: process)
         } catch {
-            recording = false; message = "Could not save this record: \(error.localizedDescription)"
+            recording = false; recordProcess = nil; message = "Could not save this record: \(error.localizedDescription)"
             completion?(false)
         }
     }
@@ -343,12 +355,18 @@ import SwiftUI
     }
     func openEvidence(_ evidence: EvidenceRecord) {
         guard !showingDemo, let reference = evidence.reference else { return }
-        if reference.hasPrefix("/") {
-            let url = URL(fileURLWithPath: reference)
+        switch EvidenceReference(reference) {
+        case .reveal(let url):
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                message = "This local reference is no longer available."; return
+            }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+            message = "Local reference shown in Finder"
+        case .website(let url):
             NSWorkspace.shared.open(url)
-        } else if let url = URL(string: reference), url.scheme == "https" || (url.scheme == "file" && (url.host == nil || url.host == "" || url.host == "localhost")) {
-            NSWorkspace.shared.open(url)
-        } else { message = "This reference cannot be opened. Inspect it at the source." }
+        case .unsupported:
+            message = "This reference cannot be opened. Inspect it at the source."
+        }
     }
     func age(_ timestamp: Double) -> String {
         guard timestamp > 0 else { return "No checkpoint" }

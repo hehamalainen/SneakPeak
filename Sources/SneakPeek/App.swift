@@ -171,7 +171,7 @@ import SwiftUI
         let script = resources.appendingPathComponent("bridge/peek.py")
         guard FileManager.default.fileExists(atPath: script.path) else { store.message = "Observer missing. Rebuild the app bundle."; return }
         do {
-            try FileManager.default.createDirectory(at: stateURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try PrivateStateFiles.ensureDirectory(stateURL.deletingLastPathComponent())
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = ["python3", script.path, "watch", "--state", stateURL.path, "--owner-pid", String(ProcessInfo.processInfo.processIdentifier)]

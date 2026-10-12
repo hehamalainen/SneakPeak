@@ -81,6 +81,9 @@ struct PeekView: View {
             Text(store.disconnected ? "Connection quiet" : store.attentionCount > 0 ? "\(store.attentionCount) decisions" : store.driftCount > 0 ? "\(store.driftCount) course concerns" : store.evidenceGapCount > 0 ? "Evidence incomplete" : store.feed.agents.isEmpty ? "Ready when you are" : "Room to focus")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(store.disconnected ? muted : store.attentionCount > 0 ? amber : mint)
+            if !store.showingDemo, store.hasUnsignedReviews {
+                Text("UNSIGNED").font(.system(size: 7, weight: .semibold)).foregroundStyle(muted)
+            }
             if store.showingDemo { Text("DEMO").font(.system(size: 7, weight: .bold)).foregroundStyle(muted) }
         }
         .frame(maxWidth: .infinity).frame(height: 25).padding(.bottom, 8)

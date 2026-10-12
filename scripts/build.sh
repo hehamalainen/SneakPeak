@@ -43,16 +43,18 @@ cat > "$task_app/Contents/Info.plist" <<'PLIST'
 </dict></plist>
 PLIST
 /usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $task_bundle_id" "$task_app/Contents/Info.plist"
-if [[ "$task_bundle_id" == "local.sneakpeek.cove.demo" || "$task_bundle_id" == "local.sneakpeek.cove.gestures" ]]; then
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName Cove Demo" "$task_app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Cove Demo" "$task_app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" "$task_app/Contents/Info.plist"
-fi
-if [[ "$task_bundle_id" == "local.sneakpeek.cove.gestures" ]]; then
-  /usr/libexec/PlistBuddy -c "Set :CFBundleName Cove Gestures" "$task_app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Cove Gestures" "$task_app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1.0" "$task_app/Contents/Info.plist"
-  /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 5" "$task_app/Contents/Info.plist"
-fi
+case "$task_bundle_id" in
+  local.sneakpeek.cove.demo)
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Cove Demo" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Cove Demo" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.0.0" "$task_app/Contents/Info.plist"
+    ;;
+  local.sneakpeek.cove.gestures)
+    /usr/libexec/PlistBuddy -c "Set :CFBundleName Cove Gestures" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName Cove Gestures" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString 1.1.0" "$task_app/Contents/Info.plist"
+    /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 5" "$task_app/Contents/Info.plist"
+    ;;
+esac
 codesign --force --sign - "$task_app"
 print "Built $task_app"

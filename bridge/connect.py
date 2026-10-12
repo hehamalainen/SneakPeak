@@ -52,7 +52,12 @@ def configure(provider: str, project: Path, state: Path):
             for event, handlers in previous_hooks.items():
                 if not isinstance(handlers, list):
                     raise ValueError("Existing hook handlers must be a list")
-                unrelated = [h for h in handlers if not any(str(arg).endswith("/copilot_hook.py") for arg in h.get("args", []))]
+                if any(not isinstance(h, dict) for h in handlers):
+                    raise ValueError("Each existing hook handler must be a JSON object")
+                if any(not isinstance(h.get("args", []), list) or
+                       any(not isinstance(arg, str) for arg in h.get("args", [])) for h in handlers):
+                    raise ValueError("Existing hook args must be a list of strings")
+                unrelated = [h for h in handlers if not any(arg.endswith("/copilot_hook.py") for arg in h.get("args", []))]
                 merged["hooks"][event] = unrelated + merged["hooks"].get(event, [])
     target.parent.mkdir(parents=True, exist_ok=True)
     backup = target.with_suffix(target.suffix + ".before-sneakpeek")

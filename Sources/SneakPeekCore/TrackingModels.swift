@@ -17,7 +17,7 @@ public struct MissionAssessment: Codable, Sendable {
         switch course {
         case "suspectedDrift": return "Drift suspected"
         case "supportedProgress": return "Progress has evidence"
-        case "readyForReview": return "Checks met · review outcome"
+        case "readyForReview": return "Checks met · unsigned review"
         default: return "Course unproven"
         }
     }
@@ -25,7 +25,7 @@ public struct MissionAssessment: Codable, Sendable {
         switch evidence {
         case "conflicting": return "A check was contradicted"
         case "stale": return "Evidence is stale"
-        case "verified": return "Checks reviewed"
+        case "verified": return "Checks reviewed · unsigned"
         case "reported": return "Evidence awaits review"
         default: return "Evidence missing"
         }
@@ -55,8 +55,8 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var reviewedAt: Double?
     public var stateLabel: String {
         switch state {
-        case "accepted": return "Check met · local review"
-        case "rejected": return "Check not met · human review"
+        case "accepted": return "Check met · unsigned local review"
+        case "rejected": return "Check not met · unsigned local review"
         case "stale": return "Evidence aged beyond its window"
         case "goalChanged": return "Evidence refers to an earlier goal"
         case "artifactChanged": return "Referenced artifact changed"

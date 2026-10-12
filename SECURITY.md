@@ -10,6 +10,31 @@ Default state lives in `~/Library/Application Support/SneakPeek`, outside the ch
 
 `runtime/`, build outputs, environment files, and preview screenshots are excluded from Git. Exclusion is not encryption or a retention policy: files can remain locally after the app exits. Review local filesystem permissions and delete sensitive state when no longer required. Share synthetic examples instead of raw runtime files or transcripts.
 
+## Local references and file permissions
+
+Agent-supplied paths and local file URLs are revealed in Finder, never launched
+through their associated application. This includes scripts, application bundles,
+Terminal profiles, aliases and symbolic links. HTTPS links open in the browser;
+other schemes and remote file URLs are rejected. Antigravity artifact handoff
+also reveals its validated local reference instead of opening it.
+
+New native state directories use 0700 permissions, and native state and decision
+files are created as 0600 before content is written and atomically replaced. The
+owned default Application Support directory is repaired when written. Existing
+explicit/shared directories are not chmodded implicitly; their files are still
+private. POSIX permissions separate local accounts, not an agent sharing your UID.
+
+Decision replies must be dated at or after the exact request's issue time, before
+its expiry, and within clock-skew tolerance. A legacy request without an issue
+time is not eligible for a file-based reply. This timing check is not identity
+authentication.
+
+Accepted checks and Taste judgments carry an unsigned marker in the main status
+and inspector. An authenticated broker, protected installation, trusted request
+producers and verified projections remain required before treating these as
+secure human acceptance. The existing command writer still cannot prove that
+its caller is human.
+
 ## Decisions and adapters
 
 In trusted-local mode, connected decisions are bound to a request ID, agent ID, available choice, and expiry. The UI waits for source acknowledgement. These checks prevent accidental misrouting and expiry mistakes; they do not authenticate who wrote the reply. A missing or expired reply never grants permission. Claude timeout returns to the host's normal permission handling. Codex cancellation/disconnection handling belongs to the included runner, not another client's session.
