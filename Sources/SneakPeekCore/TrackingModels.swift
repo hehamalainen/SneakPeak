@@ -13,11 +13,13 @@ public struct MissionAssessment: Codable, Sendable {
     public var decisionCount: Int
     public var coverageIncomplete: Bool
     public var reasons: [String]
+    public var authentication: String?
+    public var simulatedVerifiedCount: Int?
     public var courseLabel: String {
         switch course {
         case "suspectedDrift": return "Drift suspected"
         case "supportedProgress": return "Progress has evidence"
-        case "readyForReview": return "Checks met · unsigned review"
+        case "readyForReview": return authentication == "simulation" ? "SIMULATION · checks met" : "Checks claimed met · unsigned"
         default: return "Course unproven"
         }
     }
@@ -25,7 +27,7 @@ public struct MissionAssessment: Codable, Sendable {
         switch evidence {
         case "conflicting": return "A check was contradicted"
         case "stale": return "Evidence is stale"
-        case "verified": return "Checks reviewed · unsigned"
+        case "verified": return authentication == "simulation" ? "SIMULATION · checks reviewed" : "Checks claimed reviewed · unsigned"
         case "reported": return "Evidence awaits review"
         default: return "Evidence missing"
         }
@@ -53,10 +55,13 @@ public struct EvidenceRecord: Codable, Identifiable, Sendable {
     public var state: String?
     public var fingerprint: String?
     public var reviewedAt: Double?
+    public var authentication: String?
     public var stateLabel: String {
         switch state {
-        case "accepted": return "Check met · unsigned local review"
-        case "rejected": return "Check not met · unsigned local review"
+        case "accepted": return authentication == "simulation" ? "SIMULATION · check met" : "Check claimed met · unsigned"
+        case "rejected": return authentication == "simulation" ? "SIMULATION · check not met" : "Check claimed unmet · unsigned"
+        case "unavailableForAuthentication": return "Claim only · artifact or context cannot be authenticated"
+        case "invalidContext": return "Claim only · duplicate or invalid evidence context"
         case "stale": return "Evidence aged beyond its window"
         case "goalChanged": return "Evidence refers to an earlier goal"
         case "artifactChanged": return "Referenced artifact changed"
@@ -83,6 +88,8 @@ public struct TasteSignal: Codable, Identifiable, Sendable {
     public var contextStale: Bool?
     public var resolved: Bool?
     public var resolution: String?
+    public var authentication: String?
+    public var reportedAcceptance: String?
     public var label: String {
         valence == "right" ? "Feels right" : valence == "off" ? "Feels off" : "Not sure yet"
     }

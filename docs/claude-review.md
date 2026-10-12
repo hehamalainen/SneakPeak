@@ -1,5 +1,12 @@
 # Claude adversarial review follow-up
 
+The subsequent [native signing simulation](human-action-simulation.md) now strips
+unsigned acceptance in the native client and exercises definition/evidence-bound
+receipts in a separate app. It uses an ephemeral software key and mock biometry;
+the real signed-release/Keychain/Secure Enclave path remains unavailable. The
+findings below describe the underlying unsigned transport, which is retained as
+research input rather than a native human-authentication authority.
+
 This branch follows merged main `84c0ccb`, which includes Copilot fix `ad4ded0` and mission/Taste features, not the older reviewed `e5d56d7`. Mission/Taste replaces bare checkpoint verification with evidence records and reviews bound to goal revision and record fingerprint. Those bindings address stale and mismatched evidence; they do not authenticate the reviewer. The integration retains the sidecar transport and does not restore legacy verification code.
 
 ## Findings and disposition

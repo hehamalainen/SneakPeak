@@ -33,8 +33,10 @@ import SwiftUI
     private var timer: Timer?
     private var closeTask: Task<Void, Never>?
     private var recordProcess: Process?
+    let humanActionSimulation: HumanActionSimulation?
 
-    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil, automaticReload: Bool = true, readInitialFeed: Bool = true) {
+    init(stateURL: URL, demo: Bool, ownsApprovalSurface: Bool = true, missionCommandURL: URL? = nil, automaticReload: Bool = true, readInitialFeed: Bool = true, humanActionSimulation: HumanActionSimulation? = nil) {
+        self.humanActionSimulation = humanActionSimulation
         self.ownsApprovalSurface = ownsApprovalSurface
         self.missionCommandURL = missionCommandURL
         self.stateURL = stateURL; showingDemo = demo
@@ -83,9 +85,9 @@ import SwiftUI
     var visibleAttentionCount: Int { feed.queue == nil ? visibleAgents.filter { $0.needsHuman(at: now) }.count : visibleQueue.filter(\.needsDecision).count }
     var driftCount: Int { missions.filter { $0.assessment?.course == "suspectedDrift" }.count }
     var evidenceGapCount: Int { missions.filter { ["missing", "stale"].contains($0.assessment?.evidence ?? "") || $0.assessment?.coverageIncomplete == true }.count }
-    var disconnected: Bool { feed.isDisconnected(at: now) }
+    var disconnected: Bool { !isHumanActionSimulation && feed.isDisconnected(at: now) }
     var hasUnsignedReviews: Bool {
-        feed.missions.contains { ($0.assessment?.verifiedCount ?? 0) > 0 || $0.checkpoints.contains(where: \.verified) }
+        feed.missions.contains { $0.hasUnsignedHumanClaims == true || (($0.assessment?.verifiedCount ?? 0) > 0 && $0.assessment?.authentication == nil) }
     }
     var otterAttentionSignature: String {
         if let queue = feed.queue { return queue.filter(\.needsDecision).map(\.id).sorted().joined(separator: "|") }
@@ -143,7 +145,8 @@ import SwiftUI
         now = Date().timeIntervalSince1970
         let url = showingDemo ? directory.appendingPathComponent("demo-state.json") : stateURL
         do {
-            let newFeed = try JSONDecoder().decode(Feed.self, from: Data(contentsOf: url))
+            let rawFeed = try JSONDecoder().decode(Feed.self, from: Data(contentsOf: url))
+            let newFeed = HumanProjection.project(rawFeed, simulationJournal: humanActionSimulation?.journal, now: now)
             feed = newFeed
             if message == "Connecting to local sessions…" { message = nil }
             let pendingIDs = Set(newFeed.agents.compactMap { $0.request?.id })
@@ -155,6 +158,9 @@ import SwiftUI
             if !newFeed.missions.contains(where: { $0.id == selectedMissionId }) { selectedMissionId = newFeed.missions.first?.id }
             if !agents.contains(where: { $0.id == selectedAgentId }) { selectedAgentId = nil }
         } catch {
+            // A retained projection is no longer current evidence. Preserve claims for
+            // inspection, but clear every simulated acceptance on a failed refresh.
+            feed = HumanProjection.project(feed, simulationJournal: nil, now: now)
             if feed.generatedAt == 0 { message = "Connecting to local sessions…" }
             else { message = "The local feed could not be read. Check the bridge." }
             publishApprovalSurface(live: false)
@@ -190,6 +196,7 @@ import SwiftUI
         }
     }
     func toggleMode() {
+        guard !isHumanActionSimulation else { return }
         publishApprovalSurface(live: false)
         sentByMode[showingDemo] = sentRequests
         showingDemo.toggle(); selectedMissionId = nil; selectedAgentId = nil; message = nil
@@ -315,6 +322,19 @@ import SwiftUI
     }
     var currentFeedURL: URL { showingDemo ? directory.appendingPathComponent("demo-state.json") : stateURL }
     func post(_ action: String, payload: [String: Any], completion: (@MainActor @Sendable (Bool) -> Void)? = nil) {
+        if action == "taste" {
+            guard let mission = feed.missions.first(where: { $0.id == payload["missionId"] as? String }),
+                  mission.goalRevision == payload["goalRevision"] as? String else { message = "Mission context changed"; completion?(false); return }
+            performHumanAction(.taste, mission: mission, checkpointID: payload["checkpointId"] as? String ?? "",
+                value: payload["acceptance"] as? String ?? "unassessed", note: payload["note"] as? String ?? "",
+                valence: payload["valence"] as? String ?? "", strength: payload["strength"] as? String ?? "",
+                impact: payload["impact"] as? String ?? "", completion: completion)
+            return
+        }
+        guard !["review-evidence", "resolve"].contains(action), !isHumanActionSimulation else {
+            message = isHumanActionSimulation ? "The simulation uses its fixed synthetic fixture." : humanActionAvailability
+            completion?(false); return
+        }
         guard !recording, let script = missionCommandURL ?? Bundle.main.resourceURL?.appendingPathComponent("bridge/mission_commands.py") else { completion?(false); return }
         do {
             let data = try JSONSerialization.data(withJSONObject: payload)
@@ -342,16 +362,13 @@ import SwiftUI
         }
     }
     func review(_ evidence: EvidenceRecord, mission: Mission, verdict: String) {
-        guard let fingerprint = evidence.fingerprint, let goal = mission.goalRevision else { return }
-        post("review-evidence", payload: ["missionId": mission.id, "goalRevision": goal,
-             "evidenceId": evidence.id, "fingerprint": fingerprint, "verdict": verdict])
+        performHumanAction(.reviewEvidence, mission: mission, checkpointID: evidence.checkpointId,
+                           subjectID: evidence.id, subjectDigest: HumanContext.evidenceDigest(evidence), value: verdict)
     }
     func resolve(_ item: QueueItem, outcome: String) {
-        guard let id = item.recordId, let mission = feed.missions.first(where: { $0.id == item.missionId }) else { return }
-        let note = mission.tasteNotes?.first { $0.id == id }
-        let revision = item.recordGoalRevision ?? note?.goalRevision ?? mission.goalRevision ?? ""
-        post("resolve", payload: ["missionId": mission.id, "recordId": id, "recordGoalRevision": revision, "outcome": outcome])
-        if outcome == "change" { message = "Guidance recorded locally · open the source session to direct the change" }
+        guard ["taste", "judgment"].contains(item.kind), let mission = feed.missions.first(where: { $0.id == item.missionId }) else { return }
+        performHumanAction(.resolve, mission: mission, subjectID: item.id, subjectDigest: HumanContext.requestDigest(item),
+                           value: outcome, note: item.title + "\n" + item.why + "\n" + item.impact)
     }
     func openEvidence(_ evidence: EvidenceRecord) {
         guard !showingDemo, let reference = evidence.reference else { return }

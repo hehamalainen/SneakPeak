@@ -46,14 +46,21 @@ struct MissionInspector: View {
                     }
                     Spacer()
                     Button("Taste…") { store.onTaste?(mission, nil) }.foregroundStyle(tasteColor)
-                    Button("Ask for judgment…") { store.onJudgment?(mission) }
+                    Button("Ask for judgment…") { store.onJudgment?(mission) }.disabled(store.isHumanActionSimulation)
                 }
                 Text(mission.goal).font(.system(size: 13)).lineSpacing(3)
+                Text(store.humanActionAvailability).font(.caption).foregroundStyle(reviewColor)
+                if store.isHumanActionSimulation {
+                    HStack {
+                        Button("Confirm mission in simulation") { store.confirmHumanDefinition(mission) }
+                        Button("Review queue") { store.onShowQueue?() }
+                    }.buttonStyle(.bordered).disabled(store.recording)
+                }
                 if let assessment = mission.assessment {
                     HStack {
                         Label(assessment.courseLabel, systemImage: assessment.course == "suspectedDrift" ? "arrow.triangle.branch" : "scope")
                         Spacer()
-                        Text("\(assessment.verifiedCount) of \(assessment.requiredCount) required checks reviewed")
+                        Text(store.isHumanActionSimulation ? "\(assessment.simulatedVerifiedCount ?? 0) of \(assessment.requiredCount) checks · SIMULATED" : "\(assessment.verifiedCount) of \(assessment.requiredCount) checks authenticated")
                     }.font(.caption).foregroundStyle(assessment.course == "suspectedDrift" ? reviewColor : checkedColor)
                     if !assessment.reasons.isEmpty {
                         Text(assessment.reasons.joined(separator: "\n")).font(.caption).foregroundStyle(reviewColor)
@@ -69,7 +76,7 @@ struct MissionInspector: View {
                         }
                     }
                 }
-                Text("Evidence and Taste have different origins. Reviews are unsigned local records; a state writer can forge them. A finished turn does not establish that these checks are met.")
+                Text(store.isHumanActionSimulation ? "SIMULATION ONLY · Software key and mock biometry. Receipts disappear when this app quits. No real human authentication or host permissions." : "Outside reviews and Taste are unsigned claims. They do not count as authenticated checks. A finished turn does not establish that checks are met.")
                     .font(.caption).foregroundStyle(.secondary)
             } else {
                 Text("This mission is no longer available.").foregroundStyle(.secondary)
@@ -80,14 +87,14 @@ struct MissionInspector: View {
     private func checkpoint(_ check: Checkpoint, mission: Mission) -> some View {
         VStack(alignment: .leading, spacing: 11) {
             HStack {
-                Image(systemName: check.verified ? "checkmark.circle.fill" : check.trackingState == "contradicted" || check.status == "rejected" ? "exclamationmark.circle" : "circle.dotted")
-                    .foregroundStyle(check.verified ? checkedColor : reviewColor)
+                Image(systemName: check.status == "simulatedAccepted" ? "checkmark.circle" : check.verified ? "checkmark.circle.fill" : check.trackingState == "contradicted" || check.status == "rejected" ? "exclamationmark.circle" : "circle.dotted")
+                    .foregroundStyle(check.status == "simulatedAccepted" || check.verified ? checkedColor : reviewColor)
                 Text(check.label).font(.system(size: 14, weight: .medium))
                 Spacer()
                 Text(check.required == false ? "Optional" : "Required").font(.caption2).foregroundStyle(.secondary)
             }
             if check.kind == "taste" {
-                Text(check.verified ? "Taste accepted · unsigned local judgment" : check.status == "rejected" ? "Taste rejected · unsigned local judgment" : "Your judgment is still missing")
+                Text(check.status == "simulatedAccepted" ? "SIMULATION · Taste accepted" : check.status == "simulatedRejected" ? "SIMULATION · Taste rejected" : "No authenticated Taste judgment")
                     .font(.caption).foregroundStyle(tasteColor)
                 Text(check.evidence).font(.system(size: 12)).foregroundStyle(.secondary)
                 Button("Add your Taste") { store.onTaste?(mission, check) }.buttonStyle(.bordered).foregroundStyle(tasteColor)
@@ -115,7 +122,7 @@ struct MissionInspector: View {
                         }.font(.caption).buttonStyle(.bordered).disabled(store.recording || !evidence.reviewable || store.disconnected)
                     }.padding(11).background(Color.black.opacity(0.2), in: RoundedRectangle(cornerRadius: 8))
                 }
-                Button("Attach evidence…") { store.onEvidence?(mission, check) }.font(.caption).buttonStyle(.bordered)
+                Button("Attach evidence…") { store.onEvidence?(mission, check) }.font(.caption).buttonStyle(.bordered).disabled(store.isHumanActionSimulation)
             }
         }.padding(15).background(Color(red: 0.09, green: 0.095, blue: 0.105), in: RoundedRectangle(cornerRadius: 13))
     }
@@ -129,6 +136,7 @@ struct MissionInspector: View {
                 Text(store.age(note.createdAt)).font(.caption2).foregroundStyle(.secondary)
             }
             if !note.note.isEmpty { Text(note.note).font(.system(size: 12)).lineSpacing(3) }
+            Text(note.authentication == "simulation" ? "SIMULATION · signed with an ephemeral software key" : "Unsigned outside claim · not an authenticated human judgment").font(.caption2).foregroundStyle(.secondary)
             Text(note.contextStale == true ? "Recorded for an earlier goal" : note.resolved == true ? "Review resolved: \(note.resolution ?? "recorded")" : note.impact == "review" ? "Human review requested" : "An annotation · no decision requested")
                 .font(.caption2).foregroundStyle(.secondary)
         }.padding(13).background(tasteColor.opacity(0.07), in: RoundedRectangle(cornerRadius: 11))

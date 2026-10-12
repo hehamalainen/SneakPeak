@@ -35,11 +35,13 @@ The app enforces a single running instance; opening it again reveals the existin
 ## Trust model
 
 Host permissions stay in Codex or Claude by default. Inline file-based approvals
-require explicit trusted-local opt-in. Evidence reviews, Taste judgments, and the
-feed remain unsigned local records: another writer can forge them. Accepted
-checks are labelled **unsigned** in the status and inspector. These labels are
-exposure mitigation; an authenticated human-action broker is still unimplemented.
-See [security and privacy](SECURITY.md).
+require explicit trusted-local opt-in. Evidence reviews, Taste judgments and the
+feed remain unsigned claims: native acceptance no longer trusts their verified
+fields. Production human signing is unavailable and its authenticated count stays
+zero. A [separate human-action simulation](docs/human-action-simulation.md) lets
+you try native signed review, Taste and resolution with an ephemeral software key
+and an explicitly simulated Touch ID step. Its counts always say **SIMULATED**.
+See [security and privacy](SECURITY.md) for the release prerequisites.
 
 Local evidence references are shown in Finder rather than launched. HTTPS
 references open in the browser. Inspect a referenced file before accepting it.
@@ -56,9 +58,9 @@ The main app is independent of this demo.
 
 Choose a mission and click its pencil. Give it a clear outcome and two or three observable landing checks. A **finished turn** is not the same as a **verified mission**.
 
-**Inspect** opens the mission's evidence. Attach an artifact file or HTTPS reference to a check, inspect it, then choose **Check met** or **Check not met**. Reports remain claims until reviewed; a review is bound to that evidence record and the current goal. Changed goals, aged evidence, and changed local artifacts make an earlier acceptance stale. The app does not infer goal alignment from tool activity. Old bare “verified” labels without bound evidence no longer establish acceptance. Reviews and Taste records are unsigned local claims: a writer of the state can forge them. First-prompt goals are labeled as inferred until locally edited.
+**Inspect** opens the mission's evidence. Attach an artifact file or HTTPS reference to a check and inspect it. Reports remain unsigned claims. The native human-action experiment binds reviews to the complete current definition and exact evidence snapshot; **Check met**, **Check not met**, and Taste signing are available in the separate simulation. Ordinary builds explain that production authentication is unavailable. Old bare “verified” labels and sidecar reviews cannot establish native acceptance. First-prompt goals remain inferred until locally edited.
 
-The **Queue** distinguishes host decisions and explicit human judgment requests from evidence gaps and suspected drift. Missing evidence is grouped once per mission; the notch shows at most five items, with a separate full queue. **Taste…** records “feels right,” “feels off,” or uncertainty, with optional words. A hunch stays quiet unless you request review. Taste affects acceptance only for checks explicitly defined as **Human taste**. Read the [mission tracking and handoff contract](docs/mission-tracking.md) for semantics, examples, and remaining limits.
+The **Queue** distinguishes host decisions and judgment requests from evidence gaps and suspected drift. The separate simulation exercises **Taste…** (“feels right,” “feels off,” or uncertainty), optional review requests, and signed resolution. Taste affects only checks explicitly defined as **Human taste**. Read the [mission tracking and handoff contract](docs/mission-tracking.md) for the underlying unsigned research transport, and the [simulation guide](docs/human-action-simulation.md) for the stricter native experiment.
 
 Agents can publish a short progress checkpoint:
 
