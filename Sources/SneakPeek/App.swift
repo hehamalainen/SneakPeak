@@ -38,6 +38,8 @@ import SwiftUI
     private let panelGeometry = PanelGeometry()
     private var cameraHeight: CGFloat { panelGeometry.cameraHeight }
     private var screen: NSScreen?
+    private var floatingPanelAnchor: NSPoint?
+    private var draggingGlance = false
     private var previewOnly = false
     private var renderingHarnesses = false
     private var trackingPreview = ""
@@ -101,7 +103,8 @@ import SwiftUI
         panel.level = .statusBar
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
         panel.isFloatingPanel = true; panel.hidesOnDeactivate = false
-        panel.isMovable = false; panel.isReleasedWhenClosed = false
+        panel.isMovable = true; panel.isMovableByWindowBackground = false
+        panel.isReleasedWhenClosed = false
         if renderingPlayground || renderingCove || renderingCoveRaft {
             let model = OtterPlaygroundModel(store: store); playgroundModel = model
             if let name = argument("--render-scene"), let scene = OtterDemoScene(rawValue: name) {
@@ -125,6 +128,25 @@ import SwiftUI
         else if previewOnly && trackingPreview == "queue" { panel.contentView = NSHostingView(rootView: QueueManager(store: store)) }
         else { panel.contentView = NSHostingView(rootView: LivePeekRoot(store: store, geometry: panelGeometry, showRaft: args.contains("--render-raft"))) }
         store.onResize = { [weak self] in self?.position(animated: true); self?.updateAppearanceMenu() }
+        store.onPanelDragBegan = { [weak self] in
+            guard let self else { return }
+            self.draggingGlance = true
+            // Stop an in-flight hover expansion before AppKit takes over the drag.
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0
+                self.panel.animator().setFrame(self.panel.frame, display: true)
+            }
+        }
+        store.onPanelDragEnded = { [weak self] moved in
+            guard let self else { return }
+            self.draggingGlance = false
+            if moved {
+                self.floatingPanelAnchor = NSPoint(x: self.panel.frame.midX, y: self.panel.frame.maxY)
+                self.screen = self.panel.screen ?? self.chooseScreen()
+                self.panelGeometry.cameraHeight = 28
+            }
+            self.position(animated: false)
+        }
         store.onEdit = { [weak self] mission in self?.edit(mission) }
         store.onManage = { [weak self] in self?.manage() }
         store.onSetup = { [weak self] harness in self?.setup(harness) }
@@ -213,11 +235,14 @@ import SwiftUI
     }
 
     private func position(animated: Bool) {
+        guard !draggingGlance else { return }
         guard let screen = screen ?? NSScreen.main else { return }
         let width: CGFloat = renderingCove ? 240 : renderingCoveRaft ? 370 : renderingPlayground ? 740 : renderingHarnesses ? 615 : !trackingPreview.isEmpty ? 640 : store.expanded ? 470 : store.companionMode == .otter ? 350 : 320
         let height: CGFloat = renderingCove ? 220 : renderingCoveRaft ? 360 : renderingPlayground ? 790 : renderingHarnesses || !trackingPreview.isEmpty ? 735 : store.expanded ? min(710, screen.frame.height - 80) : cameraHeight + (store.companionMode == .otter ? 52 : 33)
-        let rect = NSRect(x: screen.frame.midX - width / 2, y: screen.frame.maxY - height, width: width, height: height)
-        if animated {
+        let rect = PanelPlacement.frame(size: NSSize(width: width, height: height), screen: screen.frame,
+                                        visible: screen.visibleFrame, anchor: floatingPanelAnchor)
+        if floatingPanelAnchor != nil { floatingPanelAnchor = NSPoint(x: rect.midX, y: rect.maxY) }
+        if animated && floatingPanelAnchor == nil {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.18
                 context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
@@ -229,7 +254,7 @@ import SwiftUI
     @objc private func displayChanged() {
         guard panel != nil else { return }
         screen = chooseScreen(preferred: screen)
-        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        panelGeometry.cameraHeight = floatingPanelAnchor == nil ? max(28, screen?.safeAreaInsets.top ?? 0) : 28
         // Update geometry in the existing SwiftUI tree; its selected pane and
         // other local state survive display topology changes.
         position(animated: false)
@@ -248,9 +273,21 @@ import SwiftUI
     @objc private func moveToCurrentDisplay() {
         guard panel != nil else { return }
         screen = chooseScreen()
-        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        if floatingPanelAnchor != nil, let screen {
+            floatingPanelAnchor = NSPoint(x: screen.visibleFrame.midX, y: screen.visibleFrame.maxY - 12)
+        }
+        panelGeometry.cameraHeight = floatingPanelAnchor == nil ? max(28, screen?.safeAreaInsets.top ?? 0) : 28
         position(animated: false)
         showPeek()
+    }
+
+    @objc private func resetPanelPosition() {
+        guard panel != nil else { return }
+        floatingPanelAnchor = nil
+        screen = chooseScreen(preferred: screen)
+        panelGeometry.cameraHeight = max(28, screen?.safeAreaInsets.top ?? 0)
+        position(animated: false)
+        panel.orderFrontRegardless()
     }
 
     private func makeMenu() {
@@ -269,6 +306,7 @@ import SwiftUI
         menu.addItem(.separator())
         let peek = menu.addItem(withTitle: "Peek at agents", action: #selector(togglePeek), keyEquivalent: "p"); peek.target = self
         let move = menu.addItem(withTitle: "Move to this display", action: #selector(moveToCurrentDisplay), keyEquivalent: ""); move.target = self
+        let reset = menu.addItem(withTitle: "Reset position to top", action: #selector(resetPanelPosition), keyEquivalent: ""); reset.target = self
         let demo = menu.addItem(withTitle: "Switch live / example", action: #selector(toggleDemo), keyEquivalent: "d"); demo.target = self
         let harnesses = menu.addItem(withTitle: "Manage harnesses…", action: #selector(manage), keyEquivalent: "h"); harnesses.target = self
         let queue = menu.addItem(withTitle: "Decision queue…", action: #selector(queueManager), keyEquivalent: "j"); queue.target = self

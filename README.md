@@ -22,6 +22,8 @@ cd SneakPeak
 
 SneakPeek appears at the top center of the built-in display, and in the menu bar. Hover to peek; move away to collapse. Pin it to keep it open. Escape collapses it when the panel has keyboard focus. The menu also opens the peek and quits the app. External displays without a notch use the same top-center position.
 
+Drag the header beside the eye icon to move the glance out of your way. It keeps that position as you expand, collapse, or change appearance, and stays within the display’s usable area. Choose **Reset position to top** in the menu bar to return it to the notch. Placement lasts for the current app session.
+
 Use **Try demo** for an example mission. Its decision buttons send a real local reply to a simulated waiting agent. Example data is labeled throughout. Use **Go live** to return to your own sessions. `./scripts/run.sh --demo --expanded` opens the example immediately.
 
 By default the observer discovers local sessions updated in the past 24 hours. The harness manager can extend this to 7 or 30 days and explains when a detected harness has no recent sessions. To scope it to one project:

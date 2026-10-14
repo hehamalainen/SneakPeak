@@ -18,6 +18,8 @@ import SwiftUI
     @Published var recording = false
     @Published var now = Date().timeIntervalSince1970
     var onResize: (() -> Void)?
+    var onPanelDragBegan: (() -> Void)?
+    var onPanelDragEnded: ((Bool) -> Void)?
     var onEdit: ((Mission) -> Void)?
     var onManage: (() -> Void)?
     var onSetup: ((HarnessInfo) -> Void)?
@@ -32,6 +34,7 @@ import SwiftUI
     private let missionCommandURL: URL?
     private var timer: Timer?
     private var closeTask: Task<Void, Never>?
+    private var draggingPanel = false
     private var recordProcess: Process?
     let humanActionSimulation: HumanActionSimulation?
     private let backgroundReload: Bool
@@ -228,6 +231,7 @@ import SwiftUI
         onResize?()
     }
     func hover(_ inside: Bool) {
+        guard !draggingPanel else { return }
         closeTask?.cancel()
         if inside { setExpanded(true) }
         else if !pinned {
@@ -237,6 +241,15 @@ import SwiftUI
                 self?.setExpanded(false)
             }
         }
+    }
+    func beginPanelDrag() {
+        closeTask?.cancel()
+        draggingPanel = true
+        onPanelDragBegan?()
+    }
+    func endPanelDrag(moved: Bool) {
+        draggingPanel = false
+        onPanelDragEnded?(moved)
     }
     func toggleMode() {
         guard !isHumanActionSimulation else { return }
