@@ -51,8 +51,14 @@ struct PeekView: View {
             HStack(spacing: 5) {
                 Image(systemName: "eye").font(.system(size: 11, weight: .medium))
                 if store.expanded { Text("sneakpeek").font(.system(size: 11, weight: .semibold)) }
+                Spacer(minLength: 0)
+                Image(systemName: "arrow.up.and.down.and.arrow.left.and.right")
+                    .font(.system(size: 9))
             }.foregroundStyle(muted)
-            Spacer(minLength: 180)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .overlay(PanelDragRegion(began: { store.beginPanelDrag() },
+                                         ended: { store.endPanelDrag(moved: $0) }))
+                .help("Drag the header to move SneakPeek")
             if store.expanded {
                 Button { store.pinned.toggle() } label: {
                     Image(systemName: store.pinned ? "pin.fill" : "pin").foregroundStyle(store.pinned ? mint : muted)
